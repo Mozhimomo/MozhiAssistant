@@ -1,0 +1,2 @@
+command,class,tags,syntax,help
+MozhiAgent,com.mozhi.assistant.bootstrap.MozhiAgentCommand,"mozhi,agent,campaign",MozhiAgent [chat|test [message]|status|reset],"Run in the campaign map. chat: open the chat UI after closing the console. No arguments or test: run the default tool demo. test <message>: send a prompt. status: show progress and diagnostics. reset: clear memory and reload configuration on next message. Ctrl+Shift+M also opens the chat UI on the campaign map."

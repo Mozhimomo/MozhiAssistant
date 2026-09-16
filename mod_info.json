@@ -1,0 +1,11 @@
+{
+  "id": "MozhiAssistant",
+  "name": "墨汁助手 - LangChain4j Demo",
+  "author": "墨汁",
+  "version": "0.1.0",
+  "description": "基于 LangChain4j 的舰载对话智能体。在战役地图按 Ctrl+Shift+M 打开聊天。需要 Java 17 和 Console Commands。",
+  "gameVersion": "0.98a-RC5",
+  "dependencies": [{ "id": "lw_console", "name": "Console Commands" }],
+  "jars": ["jars/mozhi-bootstrap.jar"],
+  "modPlugin": "com.mozhi.assistant.bootstrap.MozhiModPlugin"
+}

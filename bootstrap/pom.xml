@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent><groupId>com.mozhi</groupId><artifactId>mozhi-assistant-parent</artifactId><version>0.1.0</version></parent>
+    <artifactId>mozhi-bootstrap</artifactId>
+    <properties>
+        <console.jar>${maven.multiModuleProjectDirectory}/../Console Commands/jars/lw_Console.jar</console.jar>
+    </properties>
+    <!-- Local game APIs are compile-time only, never bundled. -->
+    <dependencies>
+        <dependency><groupId>com.fs.starfarer</groupId><artifactId>starfarer-api</artifactId><version>0.98a-RC5</version>
+            <scope>system</scope><systemPath>${starsector.core}/starfarer.api.jar</systemPath></dependency>
+        <dependency><groupId>org.lazywizard</groupId><artifactId>console-commands</artifactId><version>2021.3.26</version>
+            <scope>system</scope><systemPath>${console.jar}</systemPath></dependency>
+        <dependency><groupId>org.lwjgl.lwjgl</groupId><artifactId>lwjgl</artifactId><version>2.9.3</version>
+            <scope>system</scope><systemPath>${starsector.core}/lwjgl.jar</systemPath></dependency>
+        <dependency><groupId>log4j</groupId><artifactId>log4j</artifactId><version>1.2.9</version>
+            <scope>system</scope><systemPath>${starsector.core}/log4j-1.2.9.jar</systemPath></dependency>
+    </dependencies>
+    <build>
+        <finalName>mozhi-bootstrap</finalName>
+        <plugins><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-antrun-plugin</artifactId>
+            <executions><execution><id>copy-bootstrap</id><phase>package</phase><goals><goal>run</goal></goals>
+                <configuration><target>
+                    <mkdir dir="${maven.multiModuleProjectDirectory}/jars"/>
+                    <copy file="${project.build.directory}/${project.build.finalName}.jar"
+                          tofile="${maven.multiModuleProjectDirectory}/jars/mozhi-bootstrap.jar"/>
+                </target></configuration>
+            </execution></executions>
+        </plugin></plugins>
+    </build>
+</project>

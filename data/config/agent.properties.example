@@ -1,0 +1,20 @@
+# 使用 UTF-8 保存。复制为 agent.properties 后填写服务地址、模型和密钥。
+# apiKey 留空时从游戏进程的 MOZHI_API_KEY 环境变量读取。
+baseUrl=https://api.openai.com/v1/
+modelName=YOUR_TOOL_CAPABLE_MODEL
+apiKey=
+timeoutSeconds=60
+
+# 可选参数留空时使用服务端默认值。
+temperature=
+topP=
+maxTokens=
+maxCompletionTokens=
+presencePenalty=
+frequencyPenalty=
+seed=
+
+maxRetries=0
+memoryMaxMessages=12
+maxSequentialToolsInvocations=4
+systemPrompt=你是游戏《远行星号》中的墨汁智能体。简短地用中文回答。涉及玩家舰队时必须调用 getFleetSummary 实时读取最新详情，不要凭记忆猜测。涉及整数加法时必须调用 add 工具。调用完工具后向用户解释结果。

@@ -1,0 +1,8 @@
+**/target/
+/.mvn/repository/
+/.mvn/verification-settings.xml
+/jars/*.jar
+/lib/
+/.idea/
+*.iml
+/data/config/agent.properties

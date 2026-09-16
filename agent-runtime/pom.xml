@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent><groupId>com.mozhi</groupId><artifactId>mozhi-assistant-parent</artifactId><version>0.1.0</version></parent>
+    <artifactId>mozhi-agent-runtime</artifactId>
+    <dependencies>
+        <dependency><groupId>com.fs.starfarer</groupId><artifactId>starfarer-api</artifactId><version>0.98a-RC5</version>
+            <scope>system</scope><systemPath>${starsector.core}/starfarer.api.jar</systemPath></dependency>
+        <!-- The bridge has ONE definition, supplied by the game's bootstrap loader. -->
+        <dependency><groupId>com.mozhi</groupId><artifactId>mozhi-bootstrap</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
+        <dependency><groupId>dev.langchain4j</groupId><artifactId>langchain4j</artifactId><version>${langchain4j.version}</version></dependency>
+        <dependency><groupId>dev.langchain4j</groupId><artifactId>langchain4j-open-ai</artifactId><version>${langchain4j.version}</version></dependency>
+        <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-nop</artifactId><version>2.0.18</version><scope>runtime</scope></dependency>
+    </dependencies>
+    <build>
+        <finalName>agent-runtime</finalName>
+        <plugins>
+            <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-shade-plugin</artifactId>
+                <executions><execution><phase>package</phase><goals><goal>shade</goal></goals><configuration>
+                    <createDependencyReducedPom>false</createDependencyReducedPom>
+                    <minimizeJar>false</minimizeJar>
+                    <filters><filter><artifact>*:*</artifact><excludes>
+                        <exclude>META-INF/*.SF</exclude><exclude>META-INF/*.RSA</exclude><exclude>META-INF/*.DSA</exclude>
+                        <exclude>module-info.class</exclude><exclude>META-INF/versions/**/module-info.class</exclude>
+                    </excludes></filter></filters>
+                    <transformers>
+                        <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                        <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                            <manifestEntries><Multi-Release>true</Multi-Release></manifestEntries>
+                        </transformer>
+                    </transformers>
+                </configuration></execution></executions>
+            </plugin>
+            <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-antrun-plugin</artifactId>
+                <executions><execution><id>copy-private-runtime</id><phase>package</phase><goals><goal>run</goal></goals>
+                    <configuration><target>
+                        <copy file="${project.build.directory}/${project.build.finalName}.jar"
+                              tofile="${maven.multiModuleProjectDirectory}/jars/agent-runtime.jar"/>
+                    </target></configuration>
+                </execution></executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
