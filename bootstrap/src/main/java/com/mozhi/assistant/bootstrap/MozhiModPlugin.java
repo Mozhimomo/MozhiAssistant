@@ -4,35 +4,12 @@ import com.fs.starfarer.api.BaseModPlugin;
 import com.fs.starfarer.api.EveryFrameScript;
 import com.fs.starfarer.api.Global;
 import com.fs.starfarer.api.campaign.comm.IntelInfoPlugin;
-import java.lang.reflect.Method;
+
 import java.util.ArrayList;
-import org.apache.log4j.Logger;
+
 import org.lazywizard.console.Console;
 
 public final class MozhiModPlugin extends BaseModPlugin {
-    @Override
-    public void onApplicationLoad() {
-        Logger log = Global.getLogger(MozhiModPlugin.class);
-        log.info("[MozhiReflectionProbe] Plugin loader: " + MozhiModPlugin.class.getClassLoader());
-        try {
-            // Deliberately execute here, outside AgentClassLoader and the private runtime.
-            Method method = MozhiModPlugin.class.getDeclaredMethod("reflectionProbeTarget");
-            method.setAccessible(true);
-            Object result = method.invoke(this);
-            log.info("[MozhiReflectionProbe] ALLOWED: direct plugin reflection returned " + result);
-        } catch (SecurityException e) {
-            log.warn("[MozhiReflectionProbe] DENIED: direct plugin reflection was rejected; "
-                    + "check the exception for the game's script reflection filter.", e);
-        } catch (ReflectiveOperationException | LinkageError e) {
-            log.warn("[MozhiReflectionProbe] FAILED: direct plugin reflection could not complete; "
-                    + "this alone does not prove the game's reflection filter is active.", e);
-        }
-    }
-
-    private String reflectionProbeTarget() {
-        return "mozhi-direct-reflection-ok";
-    }
-
     @Override
     public void onGameLoad(boolean newGame) {
         AgentSession.reset();

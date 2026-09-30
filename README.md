@@ -1,154 +1,362 @@
-# 墨汁助手：Starsector + LangChain4j 最小智能体
+# 墨汁助手 · MozhiAssistant
 
-Java 17 / Starsector 0.98a-RC5 / Maven 多模块项目。旧 Java、Kotlin 源码已移除。
-示例使用 LangChain4j 1.15.0 的 `AiServices` 动态代理、短期聊天记忆和两个私有 `@Tool` 方法。
-需要启用 **Console Commands**。战役地图按 **Ctrl+Shift+M** 打开聊天窗口，`MozhiAgent` 指令保留用于调试。不添加情报页。
+墨汁助手是《远行星号》（Starsector）的游戏内对话 Mod，使用 LangChain4j 调用模型服务。
+你可以在战役地图中与墨汁聊天，让她读取舰队、查询游戏资料、查看市场库存，并规划购买路线和设置导航。
 
-## 游戏内聊天
+**玩家安装流程：下载 ZIP → 解压到 `mods` → 配置模型 → 启用 Mod。**
+LangChain4j 等运行依赖已包含在 `jars/agent-runtime.jar` 中，玩家无需安装 Maven，也无需自行编译。
+游戏仍需使用 Java 17，并安装 Console Commands；首次使用需填写自己的模型服务与 API key。
 
-1. 填好 `data/config/agent.properties`，构建后重启游戏并载入战役存档。
-2. 在战役地图按 **Ctrl+Shift+M**。也可打开控制台输入 **`MozhiAgent chat`**，关闭控制台后进入聊天窗口。
-   使用快捷键前先关闭改装、情报等核心界面和其他交互对话。
-3. 左侧是可滚动的对话记录，右侧输入消息，点击下方 **“发送”**。输入支持粘贴，最多 2000 个字符。
-4. 请求期间显示“墨汁正在思考”，完成后自动显示回复；错误也显示在对话中。发送按钮防止重复提交。
-5. **“关闭” / Esc** 保留当前对话和输入草稿，再次打开继续聊天。
-   **“新对话 / 重读配置”** 取消当前请求、清空界面记录和模型记忆，下次发送重新读取配置。
+## 功能
 
-这是同一个 LangChain4j 对话智能体，支持连续聊天，并可按需使用舰队摘要、加法工具。
-UI 与调试指令共用会话；UI 正常聊天不向控制台输出诊断信息。
-本次运行最多保留最近 100 条显示记录，模型记忆长度由 `memoryMaxMessages` 单独控制。
-对话和草稿不会写入存档，重新载入或退出游戏会清空。关闭聊天窗口不会取消正在进行的请求。
-界面使用游戏原生文本与选项面板，窗口内也会轮询结果，因此暂停战役时仍可收到回复。
+- **游戏内聊天**：独立对话窗口、流式回复、消息复制。
+- **舰队查询**：实时读取玩家舰队，以及指定舰船的配装、舰长、战备等信息。
+- **资料查询**：查询舰型、武器、船插、战术系统和物品；支持名称、ID 和混合列表。
+- **星球与市场查询**：查看已知星球、环境资源、产业、市场货物及仓库中的商品和舰船。
+- **购买导航**：根据物品和数量查找购买地点，规划多站路线，并设置游戏导航。
+- **会话记忆**：短期对话保存在内存；可按要求保存、修改或遗忘长期记忆，上下文接近预算时自动压缩。
 
-## 构建
+## 使用前准备
 
-在本目录使用 **JDK 17 或更新版本**和 Maven 3.9：
+| 项目 | 要求 |
+| --- | --- |
+| 游戏 | 当前项目面向 Starsector **0.98a-RC5** |
+| 游戏 Java | **Java 17** 运行环境 |
+| 前置 Mod | **Console Commands**，需要安装并启用 |
+| 模型服务 | 支持 OpenAI 兼容 Chat Completions 接口，并支持 **工具调用（Tool Calling）** |
+| 网络 | 对话时需要能访问所配置的模型服务 |
+
+仓库同时提供源码和 `jars/` 下的两个运行 JAR。普通玩家无需安装 Maven 或自行下载 LangChain4j。
+模型服务地址、模型名称和 API key 需要自行配置，游戏本体和 Console Commands 需自行安装。
+
+## 快速开始（玩家）
+
+### 1. 下载并解压
+
+在 GitHub 仓库页面选择 **Code → Download ZIP**，将压缩包中的项目文件夹解压到游戏的 `Starsector/mods/` 下。
+可以将文件夹改名为 `MozhiAssistant`。确保 `mod_info.json` 直接位于 Mod 文件夹内，不要多套一层目录：
+
+```text
+Starsector/
+├── starsector-core/
+└── mods/
+    ├── Console Commands/
+    └── MozhiAssistant/
+        ├── mod_info.json
+        ├── jars/
+        │   ├── mozhi-bootstrap.jar
+        │   └── agent-runtime.jar
+        ├── data/
+        │   └── config/agent.properties.example
+        └── graphics/
+```
+
+- `mozhi-bootstrap.jar`：游戏插件入口、聊天 UI 和类加载桥接。
+- `agent-runtime.jar`：智能体代码及 **LangChain4j、Jackson、SLF4J 等运行依赖**，依赖已经合并在此 JAR 中。
+
+不需要再放一份独立的 LangChain4j JAR，也不需要把游戏的 `starfarer.api.jar`、LWJGL 或 Log4j 复制进 Mod。
+Console Commands 作为前置 Mod 单独安装并启用。
+
+### 2. 配置模型
+
+将 `data/config/agent.properties.example` 复制一份，改名为同目录下的 `agent.properties`。
+用支持 **UTF-8** 的编辑器打开，至少修改：
+
+```properties
+baseUrl=https://你的模型服务地址/v1/
+modelName=服务商提供的模型名称
+apiKey=你的真实密钥
+```
+
+也可以写成 `apiKey=${MOZHI_API_KEY}` 引用环境变量，详见下方“密钥配置”。
+`baseUrl` 填写兼容 API 根地址，不要填写完整的 `/chat/completions` 请求地址。
+以上地址和模型名都是占位内容，需要替换；其余配置可先保留模板值。
+更新 Mod 时保留自己的 `agent.properties`，不要用模板覆盖。
+
+### 3. 启用并打开聊天
+
+1. 在游戏启动器的 Mod 列表中启用 **Console Commands** 和 **墨汁助手**。
+2. 启动游戏，载入存档，进入战役地图。
+3. 按 **Ctrl + Shift + M** 打开对话窗口。
+4. 输入问题并发送，例如：“查看我当前的舰队，介绍一下各艘船的配装。”
+
+也可以在 Console Commands 控制台输入 `MozhiAgent chat`，然后关闭控制台打开聊天。
+
+## 更新 Mod
+
+1. 退出游戏，下载新的仓库 ZIP。
+2. 将新版本文件覆盖到原来的 Mod 文件夹，保留目录结构，尤其是 `jars/`、`data/` 和 `graphics/`。
+3. 保留自己的 `data/config/agent.properties` 和 `data/memory/`，无需重新填写 key 或迁移记忆。
+4. 重新启动游戏。若新版本新增配置项，可参考新的 `agent.properties.example` 补充，不要直接覆盖真实配置。
+
+源码目录和 Maven 文件可以随 Mod 一起保留，普通玩家无需操作它们。
+
+## 密钥配置
+
+只使用一个配置项 `apiKey`，两种写法任选其一。
+
+### 直接填写密钥
+
+```properties
+apiKey=你的真实密钥
+```
+
+### 引用环境变量
+
+先在操作系统的环境变量设置中创建变量，例如 `MOZHI_API_KEY`，将其值设为真实密钥，再配置：
+
+```properties
+apiKey=${MOZHI_API_KEY}
+```
+
+`${...}` 内是环境变量名，可自行更换，例如 `${MY_MODEL_KEY}`。程序读取的是**游戏进程继承的环境变量**。
+Windows 用户可以在“编辑账户的环境变量”中添加用户变量；修改后重新打开游戏及启动器，通过 IDEA 启动时也需重启 IDEA。
+
+普通文本直接作为密钥；环境变量引用必须占据整个值，不支持拼接或嵌套。
+留空、引用格式错误、变量不存在或值为空都会报错，不会把引用文本作为 key 发送。
+
+本地 `data/config/agent.properties` 已被 Git 忽略；仓库使用不含真实密钥的 `agent.properties.example`。
+不要把真实密钥填进公共模板或强制提交本地配置。
+
+## 聊天窗口操作
+
+| 操作 | 方式 |
+| --- | --- |
+| 打开或收起窗口 | `Ctrl + Shift + M` |
+| 发送消息 | `Enter` |
+| 输入换行 | `Shift + Enter` |
+| 收起窗口 | `Esc` |
+| 粘贴内容 | `Ctrl + V` |
+| 复制消息 | 点击消息旁的“复制” |
+| 查看历史 | 鼠标滚轮或 `PageUp` / `PageDown` |
+| 回到最新消息 | 点击“回到最新回复” |
+| 开始新对话 | 点击“新对话”；已有内容时需再次确认 |
+
+窗口打开时暂停战役，收起后恢复原暂停状态。关闭窗口不会清空对话，也不会取消正在生成的回复。
+向上查看历史时暂停自动滚动。中文输入法兼容性取决于游戏运行环境，无法直接输入时可从外部复制后粘贴。
+
+## 可以怎么问
+
+直接用自然语言提出需求，智能体会选择相应工具，不需要记住工具方法名。
+
+### 舰队和游戏资料
+
+```text
+查看我当前舰队的详细情况。
+查询我舰队中名叫“先锋”的船，列出它的武器和船插。
+查询攻势级战列舰和 onslaught 的详细资料。
+一起查询攻势、燃料和重型装甲，分别说明它们是什么类别。
+```
+
+舰队查询返回当前存档中具体舰船的数据；舰型等资料查询返回基础规格。
+基础规格没有计入具体舰船的技能、配装和战斗修正。名称重名时会返回多个结果，可继续用 ID 指定对象。
+
+### 星球、市场和库存
+
+```text
+列出当前星系的已知星球。
+查询阿什鲁的市场规模、产业和资源。
+查看这个市场的仓库里有哪些商品和舰船。
+哪里能买到 200 单位燃料？先列出地点，不要修改导航。
+```
+
+市场和仓库支持远程读取，无需先进入市场。
+市场供需等级、经济储备、实体仓库内容和交易区可售数量会区分来源；仓库里存在某物品不代表它正在出售。
+购买与仓库查询会在游戏主线程调用商店的常规库存更新入口，再读取当前货物和封存舰船；不保存或复用历史库存。
+常规更新遵守游戏自身计时，会生成或更新到期库存，不强制重置计时。更新失败时仍尝试读取并明确标注时效未知。
+星球浏览仍按已知地点和调查程度展示；购买库存查询按下述全部市场范围扫描。
+
+### 购买路线与导航
+
+```text
+帮我买 100 补给和 200 燃料，不走黑市，规划路线并带路。
+查看现在的导航目标。
+这一站买完了，继续下一站。
+导航去阿什鲁。
+取消导航。
+```
+
+购买地点查询和规划每次重新遍历当前战役全部市场：经济系统市场加所有位置中实体绑定的市场，不限当前星系、访问记录、隐藏或敌对状态。
+结果包含读取游戏时间、扫描市场/交易区数量、检查的舰船条目数和总命中数；按距离显示最近若干条不代表只搜索了附近。
+交易区 cargo、主实体及关联实体 cargo 都会读取，共享仓库仅计数一次。货物列表失败仍继续检查舰船，单项异常不会丢弃整家商店。
+隐藏、敌对、黑市、仓储、缺少军用许可或交易权限未知的匹配项仍然返回，分别标明购买状态；自动路线只使用当前权限通过的结果。
+黑市选项控制是否进入购买路线，不再控制是否读取黑市库存。
+购买规划支持混合物品清单和数量，会检查交易区权限，并尝试分站凑齐清单。
+可购买对象包括舰型现货、武器、船插、普通商品和特殊物品；战术系统不能作为独立货物购买。
+按舰型名字查询时可返回同名型号；查询基础舰型也包含游戏 API 声明的关联 D 型，返回实际 hull ID 和舰船实例 ID。
+需要精确指定变体时使用其 ID。需要区分跨类别同 ID 时，可使用 `COMMODITY:fuel` 这样的“类别代码:ID”。
+
+- 仅询问购买地点时不修改导航；明确要求带路后，库存足够时设置第一站。
+- 到达当前站附近并完成购买后，告诉墨汁“继续下一站”。工具不自动执行交易。
+- 路线优先选择附近能提供所需物品的市场，不保证全局最短或最低价格。
+- 距离为星际直线距离，未计入跳跃、星系内移动和绕行；尚未计算燃料、货舱及资金是否足够。
+- 名称有歧义或已确认库存不足时，不覆盖现有导航；会返回候选对象、缺货信息或供应线索。
+- 购买路线只保存在当前会话。库存、阵营关系或需求变化后，可以要求重新规划。
+
+### 长期记忆
+
+```text
+记住：以后称呼我为舰长，回答尽量简短。
+你长期记住了我的哪些信息？
+把我的称呼改成墨汁。
+忘记我之前设置的称呼。
+```
+
+长期记忆需要由工具成功保存，默认写入 `data/memory/user-profile.json`，首次保存时创建。
+默认所有存档共用这份画像；可以通过 `longTermMemoryFile` 指定不同文件。
+
+短期对话和压缩摘要保存在内存，开始新对话、重新读档或重启游戏后清空，长期记忆保留。
+修改或遗忘长期记忆时，会清理旧的模型上下文，避免旧信息从摘要中重新带回；界面已经显示的文字可能仍保留。
+
+## 常用配置
+
+配置文件使用 UTF-8。修改文件后点击“新对话”或执行 `MozhiAgent reset`，下次请求时重新加载。
+更换 JAR 或修改操作系统环境变量后，需要重启游戏；环境变量还需由重新启动的启动器传入。
+
+| 配置项 | 用途 |
+| --- | --- |
+| `baseUrl` | 模型服务的兼容 API 根地址 |
+| `modelName` | 支持工具调用的模型名称 |
+| `apiKey` | 真实密钥或 `${环境变量名}` |
+| `systemPrompt` | 角色设定与回复要求 |
+| `streamingEnabled` | 是否流式显示回复，默认 `true` |
+| `timeoutSeconds` | 单次请求超时，默认 60 秒 |
+| `maxRetries` | 同步请求重试次数，默认 0；流式请求不自动重试 |
+| `temperature`、`topP` | 可选生成参数；留空使用服务端默认值 |
+| `maxTokens`、`maxCompletionTokens` | 单次输出上限，最多填写其中一个 |
+| `maxSequentialToolsInvocations` | 单轮对话允许的工具请求轮数，默认 4 |
+| `contextWindowTokens` | 本地上下文预算，模板为 131072，应按所用模型的实际窗口调整 |
+| `contextReserveTokens` | 为模型输出预留的预算；留空时按输出上限处理 |
+| `memoryMaxMessages` | 消息数压缩阈值，默认 64，包含工具消息 |
+| `compressionTriggerRatio` | 接近输入预算时触发压缩的比例，默认 0.8 |
+| `compressionKeepRecentTurns` | 压缩时优先保留的最近轮数，默认 4 |
+| `compressionSummaryTokens` | 摘要预算，默认 2048 |
+| `longTermMemoryFile` | 长期记忆文件路径，相对配置目录；默认 `../memory/user-profile.json` |
+
+本地预算使用序列化 UTF-8 字节保守估算，不能替代服务商的实际 token 上限。
+调大 `contextWindowTokens` 不会扩大模型本身支持的窗口；压缩摘要也会调用模型服务。
+
+### 思考模式
+
+模板中的思考配置默认留空，不向服务端发送额外参数：
+
+```properties
+thinkingMode=
+reasoningEffort=
+summaryThinkingMode=
+summaryReasoningEffort=
+```
+
+`thinkingMode` 接受 `enabled` / `disabled`，对应 `thinking.type` 扩展字段。
+`reasoningEffort` 配置思考强度。只有服务商和模型支持相应参数时才填写，具体取值以服务商说明为准。
+`summaryThinkingMode` 和 `summaryReasoningEffort` 独立控制上下文压缩请求，不继承对话设置。
+启用思考时，输出预算需要同时容纳思考和正文；界面只显示回复正文。
+
+## 常见问题
+
+### Maven 提示 settings.xml 不存在
+
+检查 IDEA 的 Maven 设置或运行命令中的 `-s` 参数，移除失效的自定义路径，或指定真实存在的 `settings.xml`。
+项目不依赖某台电脑上的固定 Maven 安装路径。
+
+### 编译时找不到游戏或 Console Commands 的 JAR
+
+确认源码目录符合上面的结构，并且安装了 Console Commands。
+目录不同则通过 `-Dstarsector.core=...` 和 `-Dconsole.jar=...` 指定实际路径。
+用 `mvn -v` 检查 Maven 是否运行在 JDK 17 或更新版本上。
+
+### 下载后缺少 jars 中的运行文件
+
+检查是否完整解压了仓库 ZIP，两个运行 JAR 应与 `mod_info.json`、`data/`、`graphics/` 一起保留。
+如果下载的版本本身没有这两个文件，该版本就不能直接运行，需要包含运行 JAR 的版本；
+开发者可按“从源码编译”章节重新构建。
+
+### 快捷键没有反应
+
+确认两个 Mod 均已启用，`jars/` 中包含 `mozhi-bootstrap.jar` 和 `agent-runtime.jar`，且已经进入战役地图。
+尝试使用 `MozhiAgent chat`，关闭控制台后再操作。
+
+### 密钥错误或环境变量读取失败
+
+检查 `apiKey` 写法，环境变量引用须完整写成 `${变量名}`。
+确认变量对游戏启动进程可见，并重新打开启动器或 IDEA。
+若服务端返回认证错误，还需检查密钥是否适用于当前 `baseUrl`。
+
+### 能聊天，但无法查询舰队或调用工具
+
+确认模型和服务端支持工具调用。模型仅在回复中描述“正在查询”不代表真的执行了工具。
+可以通过 `MozhiAgent status` 查看当前请求进度与诊断信息。
+
+### 流式请求失败或等待时间过长
+
+检查网络、服务地址及超时设置。若服务不支持流式接口，设置 `streamingEnabled=false` 后开始新对话。
+
+### 上下文压缩失败
+
+检查服务端是否返回有效摘要，以及摘要输出预算、思考参数是否适用于当前模型。
+压缩失败时不会用无效摘要覆盖原历史。可调整配置后开始新对话；这会清空短期上下文，保留长期记忆。
+
+### 查不到有货的市场，或到站后库存变化
+
+查询现在会读取全部市场及实体仓库，并把交易限制作为结果状态，受限不等于无货。
+可先检查返回的实际 hull ID、游戏读取时间、扫描数量、未展示条目和读取失败提示。自定义商店可能无法执行常规更新或检查权限，此时会保留当前读到的库存并说明不确定性。
+可以指定市场查询仓库，或要求重新规划。经济数据有供应但没有确认到可买件数时，会返回供应线索。
+
+## 控制台命令
+
+| 命令 | 功能 |
+| --- | --- |
+| `MozhiAgent chat` | 打开聊天窗口，执行后关闭控制台 |
+| `MozhiAgent status` | 查看进度和诊断信息 |
+| `MozhiAgent reset` | 重置会话，下次请求重新读取配置 |
+| `MozhiAgent test <消息>` | 开发调试用：直接提交一条消息 |
+
+## 从源码编译（开发者）
+
+修改代码时需要 **JDK 17 或更新版本**及 **Maven 3.9**。构建目标为 Java 17，首次构建需要下载 Maven 依赖。
+
+在游戏的 `Starsector/mods` 目录中执行：
 
 ```powershell
+git clone https://github.com/Mozhimomo/MozhiAssistant.git
+cd MozhiAssistant
 mvn -Dmaven.test.skip=true clean package
 ```
 
-默认从 `../../starsector-core/starfarer.api.jar` 编译游戏入口。异地开发可覆盖：
+构建默认引用 `../../starsector-core` 中的游戏库，以及 `../Console Commands/jars/lw_Console.jar`。
+若目录不同，可显式指定路径：
 
 ```powershell
-mvn "-Dstarsector.core=D:/Game/starsector0.98/Starsector/starsector-core" -Dmaven.test.skip=true clean package
+mvn "-Dstarsector.core=D:/Games/Starsector/starsector-core" "-Dconsole.jar=D:/Games/Starsector/mods/Console Commands/jars/lw_Console.jar" -Dmaven.test.skip=true clean package
 ```
 
-产物自动复制到 `jars/mozhi-bootstrap.jar` 和 `jars/agent-runtime.jar`。
-游戏 API 使用 Maven `system` 作用域引用本机文件；不从公共仓库下载、不打入产物。
-Console Commands 编译依赖默认位于 `../Console Commands/jars/lw_Console.jar`，可用
-`"-Dconsole.jar=D:/path/to/lw_Console.jar"` 覆盖；该依赖也不打入产物。
-旧 `lib/`、旧 JAR 保留在磁盘，但新构建不引用，`mod_info.json` 也不加载它们。
-更新代码后退出并重启游戏，让已加载的类和 JAR 文件句柄释放。
+将路径替换为自己的实际路径。编译产物自动更新 `jars/mozhi-bootstrap.jar` 和 `jars/agent-runtime.jar`。
+后者通过 Maven Shade 合并第三方运行依赖，并保留服务发现资源；游戏库、桥接模块和 Lombok 不打入其中。
 
-## 手动验证
+**提交代码更新时，同步提交重新构建的这两个 JAR**，使仓库 ZIP 中的运行文件与源码一致。
+本地模型配置、记忆、游戏依赖、Maven 缓存和 `target/` 构建目录仍不提交。
+更新 JAR 后需要重启游戏。
 
-1. 编辑 `data/config/agent.properties` 的 `baseUrl`、`modelName`、`apiKey`。
-   地址使用 OpenAI 兼容的 API 根地址（通常到 `/v1/`，不要加 `/chat/completions`）。
-   模型必须支持工具调用。密钥也可通过游戏进程继承的 `MOZHI_API_KEY` 环境变量提供。
-2. 使用 Java 17 启动游戏，启用本 Mod 和 Console Commands，开始或载入一个存档。
-   上一版 `AgentDemoIntel` 的情报条目会在读档时移除，保留最小兼容类供旧存档解析。
-   更早版本含已删除的 `Test_intel` 等类的存档仍不能保证兼容。
-3. 在战役地图中按 **Ctrl + Backspace** 打开控制台（默认快捷键），输入 `MozhiAgent test`。
-4. 完成后查看控制台输出；也可输入 `MozhiAgent status` 主动获取结果。应看到模型回复及实际工具调用记录：
-   `getFleetSummary() -> ...`、`add(17, 25) -> 42`。
-5. 诊断区应显示 LangChain4j/Jackson 位于运行区、动态代理已创建、桥接接口由父加载器共享均为 `true`。
-   只有回复、没有工具调用记录，说明模型没有执行工具，不能据此判定工具反射链路验证成功。
+## 数据与源码
 
-### 指令
+对话内容、执行工具取得的结果和加载的长期画像会发送到你配置的模型服务。
+短期会话不写入存档；长期画像以 JSON 保存，默认 `data/memory/` 已被 Git 忽略。
+如果将画像改到其他目录，请同步检查忽略规则。
 
-```text
-MozhiAgent
-MozhiAgent chat
-MozhiAgent test
-MozhiAgent test 请调用加法工具计算 17 + 25
-MozhiAgent status
-MozhiAgent reset
-```
+项目分为两个 Maven 模块：
 
-`chat`：关闭控制台后打开聊天界面。无参数或 `test`：使用默认提问验证舰队摘要和加法工具。
-`test <文本>`：发送自定义消息。`status`：查看进度、最近回复和调用记录。
-`reset`：取消当前请求并清空会话，下次 `test` 重新读取配置。
-仅支持战役地图；战斗、模拟战中会提示上下文不适用。请求进行中不会重复提交。
+| 位置 | 职责 |
+| --- | --- |
+| `bootstrap/` | 游戏插件入口、聊天 UI、主线程调度、类加载器及桥接接口 |
+| `agent-runtime/` | LangChain4j、ReAct 循环、模型配置、上下文压缩和记忆 |
+| `agent-runtime/.../runtime/tools/` | 舰队、规格、记忆、星球和购买导航工具 |
+| `data/config/agent.properties.example` | 可提交的配置模板 |
+| `data/console/commands.csv` | Console Commands 命令注册 |
+| `graphics/portraits/` | 对话头像 |
 
-指令注册表：`data/console/commands.csv`。
-调用路径：`MozhiAgentCommand.runCommand()` → `runTest(String)` → `AgentSession.send()` → 运行区 `LangChainAgent.chat()`。
-需要修改测试逻辑时编辑 `MozhiAgentCommand.runTest(String)`；这个方法应在战役主线程调用。
+调用由 `AgentSession` 经桥接接口进入 `ReActLoop`，每轮由 `ReActTurn` 执行。
+工具经 `ToolInjector` 和 `ToolRegistry` 注册，需要访问游戏数据的操作通过 `GameThreadAccess` 回到主线程。
 
-不会在启动或载入存档时自动请求模型。执行测试指令会把输入和工具返回的舰队名称、舰船数量发给配置的服务。
-默认最多进行 4 轮连续工具调用；每个 HTTP 请求独立超时，默认不自动重试，均可通过配置调整。
-`MozhiAgent reset` 清空记忆、取消当前请求，并在下次测试时重新读取配置。
-会话不写入存档。发送消息时不采集舰队；只有模型实际调用工具时，才通过
-`GameThreadAccess.call(...)` 在游戏主线程执行 `Global.getSector().getPlayerFleet().getFleetData()`。
-每次工具调用重新读取，返回位置、资源、逐舰型号、舰长、CR、船体、武器、战机和插件等详情。
-`getMembersListCopy()` 只是本次调用中遍历成员的 API，不作为跨请求缓存。
-HTTP 请求在后台线程进行，游戏界面由主线程更新；`addOnslaught()` 等修改游戏状态的工具同样回到主线程。
-使用控制台测试时，提交后关闭控制台返回战役，让主线程处理工具请求；也可用 `status` 推进，或直接使用聊天窗口。
-
-## 模型与智能体配置
-
-首次克隆后，将 `data/config/agent.properties.example` 复制为 `data/config/agent.properties`，再填写模型和密钥。文件按 UTF-8 读取。
-实际配置文件已被 Git 忽略，只上传不含密钥的示例模板。本地游戏依赖、构建产物和 Maven 缓存也不上传。
-已有地址、模型名、密钥保持原值；新增配置缺失时仍可按默认行为运行。
-
-| 配置项 | 默认值 / 留空行为 | 用途与范围 |
-| --- | --- | --- |
-| `baseUrl` | `https://api.openai.com/v1/` | OpenAI 兼容服务的 API 根地址 |
-| `modelName` | 必填 | 支持工具调用的模型 ID |
-| `apiKey` | 留空读取 `MOZHI_API_KEY` | 服务密钥 |
-| `temperature` | 不发送，使用服务端默认值 | 采样温度，0–2 |
-| `topP` | 不发送，使用服务端默认值 | 累积概率采样阈值，0–1 |
-| `maxTokens` | 不发送，使用服务端默认值 | 输出 token 上限，正整数 |
-| `maxCompletionTokens` | 不发送，使用服务端默认值 | 部分模型使用的输出 token 上限，正整数；与 `maxTokens` 二选一 |
-| `presencePenalty` | 不发送，使用服务端默认值 | 对已出现内容的惩罚，-2–2 |
-| `frequencyPenalty` | 不发送，使用服务端默认值 | 按出现频率施加的惩罚，-2–2 |
-| `seed` | 不发送 | 32 位整数随机种子，实际效果由服务端决定 |
-| `timeoutSeconds` | `60` | 每次 HTTP 请求超时秒数，1–300 |
-| `maxRetries` | `0` | 请求重试次数，0–10 |
-| `memoryMaxMessages` | `12` | 记忆消息上限，3–10000；包括系统、用户、模型及工具消息，不是对话轮数 |
-| `maxSequentialToolsInvocations` | `4` | 连续工具调用轮数上限，1–100；一轮可能包含多个工具 |
-| `systemPrompt` | 示例中的墨汁提示词 | 可直接修改系统指令；显式填写时不能为空，值内可用 `\n` 换行 |
-
-配置加载时校验数值范围、非数值、无穷值及冲突的 token 上限；错误会显示在控制台。
-不同服务、模型支持的参数和范围可能不同，不支持的可选参数请留空。
-新增或修改参数后，输入 **`MozhiAgent reset`**，在下一次测试时生效，无需重新编译。
-首次安装本次代码更新仍需重新启动游戏以加载新的 JAR。
-
-## “反射安全区”的实现
-
-```text
-游戏脚本加载器（有反射过滤）
-  └─ mozhi-bootstrap.jar
-      ├─ 游戏插件、聊天窗口、快捷键、控制台指令、线程调度
-      ├─ bridge.AgentBridge（唯一的共享接口）
-      └─ AgentClassLoader（自行定义运行区的类）
-          └─ agent-runtime.jar
-              ├─ LangChainAgent / Assistant / DemoTools
-              ├─ LangChain4j / Jackson / SLF4J
-              └─ HTTP 客户端及其 ServiceLoader 配置
-```
-
-- **关键不是只改线程上下文加载器。** `AgentClassLoader.loadClass()` 对运行区代码和所有第三方依赖直接 `findClass()`，由它自己定义类。缺失依赖直接报错，避免意外绑定其他 Mod 的同名类。
-- JDK 类型直接交给平台加载器（也覆盖 `org.w3c.dom` 等非 `java.*` 包）；平台找不到的私有代码由运行区自己定义，因此解析 `Field`、`Method`、`Proxy` 时不会经过游戏的反射过滤器。
-- 桥接接口和游戏类型继续委派给游戏加载器，保留相同的类身份。
-- 线程上下文加载器在整个智能体初始化和调用期间切换到运行区，结束后恢复；服务资源仅从运行区 JAR 发现，Shade 合并 `META-INF/services`。
-- **`agent-runtime.jar` 不可加入 `mod_info.json` 的 `jars` 数组。** 否则框架可能先被游戏加载，隔离失效。
-- bootstrap 不能直接 `new LangChainAgent()` 或导入 LangChain4j。通过类名加载入口，再转换成共享的 `AgentBridge`。入口有公开无参构造器；这里刻意使用 `Class.newInstance()`，避免在受限一侧解析 `Constructor`。
-
-这里的“安全区”指可反射的独立类加载环境，不是隔离恶意代码的安全沙箱。
-它解除游戏脚本类加载过滤对运行区的影响；**不解除 Java 17 模块强封装**，也不会让 bootstrap 中的直接反射自动可用。
-普通业务对象和这里的 LangChain4j 工具反射不需要修改游戏 JAR 或 `vmparams`。
-
-## 扩展
-
-- 新工具放在 `agent-runtime/src/main/java/com/mozhi/assistant/runtime/`，用 `@Tool` 标记并注册到 `AiServices`。
-- 第三方依赖加入 `agent-runtime/pom.xml`，Maven 自动打入私有 JAR，无需维护依赖包名前缀列表。
-- 需要游戏 API 时，在运行区工具内调用 `gameThread.call(() -> { /* Global... */ return result; })`。
-  回调仍由运行区的类定义，但在游戏主线程执行；只将文本结果交给后台模型。切换线程与类加载隔离是两回事。
-- 不把运行区的代理、记忆、工具对象放进游戏存档；跨加载器的公开签名不使用框架类型或 `java.lang.reflect.*`。
-
-实现参考：[LangChain4j AI Services](https://docs.langchain4j.dev/tutorials/ai-services/)、
-[工具调用](https://docs.langchain4j.dev/tutorials/tools/)、
-[Java ClassLoader](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ClassLoader.html)。
-
-按要求，本次不运行自动测试、游戏运行测试或真实模型请求；手动验证入口已提供。
+运行时采用独立类加载器加载 LangChain4j 等依赖，并与游戏共享桥接接口和游戏 API 类型。
+`mod_info.json` 只列出 `mozhi-bootstrap.jar`；**不要把 `agent-runtime.jar` 添加到其 `jars` 数组**。
+类加载隔离不是恶意代码沙箱，也不解除 Java 模块的强封装限制。

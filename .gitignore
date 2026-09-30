@@ -1,8 +1,12 @@
 **/target/
 /.mvn/repository/
 /.mvn/verification-settings.xml
+# Keep game libraries out; ship the two self-contained mod runtime JARs.
 /jars/*.jar
+!/jars/mozhi-bootstrap.jar
+!/jars/agent-runtime.jar
 /lib/
-/.idea/
+**/.idea/
 *.iml
 /data/config/agent.properties
+/data/memory/
