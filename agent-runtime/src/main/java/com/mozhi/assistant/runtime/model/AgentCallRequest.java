@@ -1,8 +1,7 @@
 package com.mozhi.assistant.runtime.model;
 
 import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.chat.StreamingChatModel;
+import com.mozhi.llm.LlmClient;
 import com.mozhi.assistant.bridge.AgentStreamListener;
 import dev.langchain4j.service.tool.ToolProvider;
 import lombok.Builder;
@@ -25,17 +24,11 @@ public class AgentCallRequest {
     private String userPrompt;
 
     // 调用所需的模型和工具。
-    private ChatModel model;
-    private ChatModel summaryModel;
-
-    /** 配置此模型时使用真实流式响应；同步模型仍供摘要或兼容调用使用。 */
-    private StreamingChatModel streamingModel;
+    private LlmClient llmClient;
+    private LlmClient summaryClient;
 
     @Builder.Default
     private AgentStreamListener streamListener = AgentStreamListener.NONE;
-
-    @Builder.Default
-    private int streamTimeoutSeconds = 60;
 
     @Builder.Default
     private List<Object> tools = new ArrayList<>();
@@ -75,6 +68,11 @@ public class AgentCallRequest {
     @Builder.Default
     private int compressionKeepRecentTurns = 4;
 
+    /** 摘要提示词中的目标 UTF-8 字节数，仅作引导；完整保留模型返回正文。 */
     @Builder.Default
     private int compressionSummaryTokens = 2048;
+
+    /** 摘要请求生成预算包含服务端思考，独立于最终保存的摘要长度。 */
+    @Builder.Default
+    private int summaryMaxOutputTokens = 8192;
 }

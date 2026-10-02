@@ -4,7 +4,7 @@
 你可以在战役地图中与墨汁聊天，让她读取舰队、查询游戏资料、查看市场库存，并规划购买路线和设置导航。
 
 **玩家安装流程：下载 ZIP → 解压到 `mods` → 配置模型 → 启用 Mod。**
-LangChain4j 等运行依赖已包含在 `jars/agent-runtime.jar` 中，玩家无需安装 Maven，也无需自行编译。
+LangChain4j 等运行依赖已包含在 `jars/mozhi-llm-client.jar` 中，玩家无需安装 Maven，也无需自行编译。
 游戏仍需使用 Java 17，并安装 Console Commands；首次使用需填写自己的模型服务与 API key。
 
 ## 功能
@@ -26,7 +26,7 @@ LangChain4j 等运行依赖已包含在 `jars/agent-runtime.jar` 中，玩家无
 | 模型服务 | 支持 OpenAI 兼容 Chat Completions 接口，并支持 **工具调用（Tool Calling）** |
 | 网络 | 对话时需要能访问所配置的模型服务 |
 
-仓库同时提供源码和 `jars/` 下的两个运行 JAR。普通玩家无需安装 Maven 或自行下载 LangChain4j。
+仓库同时提供源码和 `jars/` 下的三个运行 JAR。普通玩家无需安装 Maven 或自行下载 LangChain4j。
 模型服务地址、模型名称和 API key 需要自行配置，游戏本体和 Console Commands 需自行安装。
 
 ## 快速开始（玩家）
@@ -45,14 +45,16 @@ Starsector/
         ├── mod_info.json
         ├── jars/
         │   ├── mozhi-bootstrap.jar
-        │   └── agent-runtime.jar
+        │   ├── agent-runtime.jar
+        │   └── mozhi-llm-client.jar
         ├── data/
         │   └── config/agent.properties.example
         └── graphics/
 ```
 
 - `mozhi-bootstrap.jar`：游戏插件入口、聊天 UI 和类加载桥接。
-- `agent-runtime.jar`：智能体代码及 **LangChain4j、Jackson、SLF4J 等运行依赖**，依赖已经合并在此 JAR 中。
+- `agent-runtime.jar`：智能体逻辑、工具、上下文压缩和记忆，不内嵌 LLM 包。
+- `mozhi-llm-client.jar`：独立 LLM 基础设施及 **LangChain4j、Jackson、SLF4J 等运行依赖**，供 agent 调用，也可供其他项目复用。
 
 不需要再放一份独立的 LangChain4j JAR，也不需要把游戏的 `starfarer.api.jar`、LWJGL 或 Log4j 复制进 Mod。
 Console Commands 作为前置 Mod 单独安装并启用。
@@ -221,7 +223,7 @@ Windows 用户可以在“编辑账户的环境变量”中添加用户变量；
 | `systemPrompt` | 角色设定与回复要求 |
 | `streamingEnabled` | 是否流式显示回复，默认 `true` |
 | `timeoutSeconds` | 单次请求超时，默认 60 秒 |
-| `maxRetries` | 同步请求重试次数，默认 0；流式请求不自动重试 |
+| `maxRetries` | 同步请求重试次数，默认 0；流式连接异常在尚未输出文字时独立重试一次 |
 | `temperature`、`topP` | 可选生成参数；留空使用服务端默认值 |
 | `maxTokens`、`maxCompletionTokens` | 单次输出上限，最多填写其中一个 |
 | `maxSequentialToolsInvocations` | 单轮对话允许的工具请求轮数，默认 4 |
@@ -230,7 +232,8 @@ Windows 用户可以在“编辑账户的环境变量”中添加用户变量；
 | `memoryMaxMessages` | 消息数压缩阈值，默认 64，包含工具消息 |
 | `compressionTriggerRatio` | 接近输入预算时触发压缩的比例，默认 0.8 |
 | `compressionKeepRecentTurns` | 压缩时优先保留的最近轮数，默认 4 |
-| `compressionSummaryTokens` | 摘要预算，默认 2048 |
+| `compressionSummaryTokens` | 提示词中的摘要目标长度（UTF-8 字节），默认 2048；仅作引导，完整保留模型返回正文 |
+| `summaryMaxOutputTokens` | 摘要生成 token 预算（含思考），留空默认最高 8192，随小窗口缩小 |
 | `longTermMemoryFile` | 长期记忆文件路径，相对配置目录；默认 `../memory/user-profile.json` |
 
 本地预算使用序列化 UTF-8 字节保守估算，不能替代服务商的实际 token 上限。
@@ -267,13 +270,13 @@ summaryReasoningEffort=
 
 ### 下载后缺少 jars 中的运行文件
 
-检查是否完整解压了仓库 ZIP，两个运行 JAR 应与 `mod_info.json`、`data/`、`graphics/` 一起保留。
-如果下载的版本本身没有这两个文件，该版本就不能直接运行，需要包含运行 JAR 的版本；
+检查是否完整解压了仓库 ZIP，三个运行 JAR 应与 `mod_info.json`、`data/`、`graphics/` 一起保留。
+如果下载的版本本身没有这三个文件，该版本就不能直接运行，需要包含运行 JAR 的版本；
 开发者可按“从源码编译”章节重新构建。
 
 ### 快捷键没有反应
 
-确认两个 Mod 均已启用，`jars/` 中包含 `mozhi-bootstrap.jar` 和 `agent-runtime.jar`，且已经进入战役地图。
+确认两个 Mod 均已启用，`jars/` 中包含 `mozhi-bootstrap.jar`、`agent-runtime.jar` 和 `mozhi-llm-client.jar`，且已经进入战役地图。
 尝试使用 `MozhiAgent chat`，关闭控制台后再操作。
 
 ### 密钥错误或环境变量读取失败
@@ -289,12 +292,12 @@ summaryReasoningEffort=
 
 ### 流式请求失败或等待时间过长
 
-检查网络、服务地址及超时设置。若服务不支持流式接口，设置 `streamingEnabled=false` 后开始新对话。
+连接重置通常表示网络、代理或服务端中断连接。尚未输出正文时自动重试当前模型请求一次，不重跑已经执行的工具；已输出正文时保留片段并报告失败。检查网络、服务地址及超时设置。若服务不支持流式接口，设置 `streamingEnabled=false` 后开始新对话。
 
 ### 上下文压缩失败
 
 检查服务端是否返回有效摘要，以及摘要输出预算、思考参数是否适用于当前模型。
-压缩失败时不会用无效摘要覆盖原历史。可调整配置后开始新对话；这会清空短期上下文，保留长期记忆。
+压缩失败时不会用无效摘要覆盖原历史。原历史仍在输入预算内时继续本轮对话；超过预算时停止并报告具体原因。空摘要错误包含结束原因和 token 用量，可据此检查服务端是否接受关闭思考的参数，或提高 `summaryMaxOutputTokens`。调整配置后开始新对话会清空短期上下文，保留长期记忆。
 
 ### 查不到有货的市场，或到站后库存变化
 
@@ -310,6 +313,14 @@ summaryReasoningEffort=
 | `MozhiAgent status` | 查看进度和诊断信息 |
 | `MozhiAgent reset` | 重置会话，下次请求重新读取配置 |
 | `MozhiAgent test <消息>` | 开发调试用：直接提交一条消息 |
+
+## 单独使用 LLM 基础设施
+
+`llm-client/` 是独立 Maven 模块，不依赖游戏、UI 或 agent。其他项目可只引入 `com.mozhi:mozhi-llm-client:0.1.0`；手动引入时使用 `llm-client/target/mozhi-llm-client-0.1.0-all.jar`，其中已包含模型调用所需的第三方依赖。
+
+完整接入方法、流式回调、历史/工具请求及远行星号隔离加载示例见 [LLM Client 文档](llm-client/README.md)。该构件尚未发布到公共 Maven 仓库，需要先在本地构建安装。
+
+agent 的普通回复与摘要生成均调用 `LlmClient`；ReAct、工具执行和记忆策略留在 agent 中。原配置文件继续使用。自行构造 `AgentCallRequest` 的代码请改用 `.llmClient(...)` 和 `.summaryClient(...)`，自定义 LangChain4j 模型可用 `LlmClient.of(...)` 包装。
 
 ## 从源码编译（开发者）
 
@@ -330,12 +341,18 @@ mvn -Dmaven.test.skip=true clean package
 mvn "-Dstarsector.core=D:/Games/Starsector/starsector-core" "-Dconsole.jar=D:/Games/Starsector/mods/Console Commands/jars/lw_Console.jar" -Dmaven.test.skip=true clean package
 ```
 
-将路径替换为自己的实际路径。编译产物自动更新 `jars/mozhi-bootstrap.jar` 和 `jars/agent-runtime.jar`。
-后者通过 Maven Shade 合并第三方运行依赖，并保留服务发现资源；游戏库、桥接模块和 Lombok 不打入其中。
+将路径替换为自己的实际路径。根项目执行 `package` 后自动更新 `jars/mozhi-bootstrap.jar`、`jars/agent-runtime.jar` 和 `jars/mozhi-llm-client.jar`。
+只有 LLM 包通过 Maven Shade 合并第三方运行依赖并保留服务发现资源。agent 是普通业务 JAR，必须与 LLM 包一起加载；游戏库、桥接模块和 Lombok 不打入 LLM 包。
 
-**提交代码更新时，同步提交重新构建的这两个 JAR**，使仓库 ZIP 中的运行文件与源码一致。
+**提交代码更新时，同步提交重新构建的这三个 JAR**，使仓库 ZIP 中的运行文件与源码一致。
 本地模型配置、记忆、游戏依赖、Maven 缓存和 `target/` 构建目录仍不提交。
-更新 JAR 后需要重启游戏。
+更新 JAR 前请完全退出游戏，Windows 无法覆盖游戏映射使用的 JAR。游戏运行中只编译、不复制到安装目录时，可以使用：
+
+```powershell
+mvn -Dmozhi.skipDeployment=true -Dmaven.test.skip=true package
+```
+
+此时新产物仅在各模块的 `target/` 目录；退出游戏后，在根目录重新执行不带跳过参数的 `mvn package`，将三个运行 JAR 一起更新。
 
 ## 数据与源码
 
@@ -343,12 +360,13 @@ mvn "-Dstarsector.core=D:/Games/Starsector/starsector-core" "-Dconsole.jar=D:/Ga
 短期会话不写入存档；长期画像以 JSON 保存，默认 `data/memory/` 已被 Git 忽略。
 如果将画像改到其他目录，请同步检查忽略规则。
 
-项目分为两个 Maven 模块：
+项目分为三个 Maven 模块：
 
 | 位置 | 职责 |
 | --- | --- |
 | `bootstrap/` | 游戏插件入口、聊天 UI、主线程调度、类加载器及桥接接口 |
-| `agent-runtime/` | LangChain4j、ReAct 循环、模型配置、上下文压缩和记忆 |
+| `llm-client/` | 可单独引入的 LLM 基础设施：模型连接配置、同步/流式调用、重试及通用隔离加载入口 |
+| `agent-runtime/` | ReAct 循环、工具执行、上下文压缩和记忆，通过 LlmClient 调用模型 |
 | `agent-runtime/.../runtime/tools/` | 舰队、规格、记忆、星球和购买导航工具 |
 | `data/config/agent.properties.example` | 可提交的配置模板 |
 | `data/console/commands.csv` | Console Commands 命令注册 |
@@ -358,5 +376,5 @@ mvn "-Dstarsector.core=D:/Games/Starsector/starsector-core" "-Dconsole.jar=D:/Ga
 工具经 `ToolInjector` 和 `ToolRegistry` 注册，需要访问游戏数据的操作通过 `GameThreadAccess` 回到主线程。
 
 运行时采用独立类加载器加载 LangChain4j 等依赖，并与游戏共享桥接接口和游戏 API 类型。
-`mod_info.json` 只列出 `mozhi-bootstrap.jar`；**不要把 `agent-runtime.jar` 添加到其 `jars` 数组**。
+`mod_info.json` 只列出 `mozhi-bootstrap.jar`；**不要把 `agent-runtime.jar` 或 `mozhi-llm-client.jar` 添加到其 `jars` 数组**。
 类加载隔离不是恶意代码沙箱，也不解除 Java 模块的强封装限制。

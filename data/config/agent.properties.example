@@ -25,7 +25,10 @@ contextWindowTokens=131072
 contextReserveTokens=
 compressionTriggerRatio=0.8
 compressionKeepRecentTurns=4
+# 提示词中的摘要目标长度（UTF-8 字节），仅作引导；模型返回正文完整保留，不截取。
 compressionSummaryTokens=2048
+# 摘要请求生成预算（含思考），独立于保存长度；留空默认最高 8192，随小窗口缩小。
+summaryMaxOutputTokens=
 # 相对 agent.properties 所在目录；默认所有存档共享一份用户画像。
 longTermMemoryFile=../memory/user-profile.json
 

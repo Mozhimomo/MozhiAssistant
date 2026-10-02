@@ -12,8 +12,9 @@ import java.util.Set;
 public final class AgentClassLoader extends URLClassLoader {
     static { registerAsParallelCapable(); }
 
-    public AgentClassLoader(URL runtimeJar, ClassLoader gameLoader) {
-        super("Mozhi-Agent-Runtime", new URL[]{runtimeJar}, gameLoader);
+    public AgentClassLoader(URL runtimeJar, URL llmJar, ClassLoader gameLoader) {
+        // Agent and LLM dependencies have one private class identity across two physical JARs.
+        super("Mozhi-Agent-Runtime", new URL[]{runtimeJar, llmJar}, gameLoader);
     }
 
     @Override

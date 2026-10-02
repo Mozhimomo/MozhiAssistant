@@ -107,6 +107,7 @@ public final class AgentSession {
         if (loader == null) {
             loader = new AgentClassLoader(
                     new URL(bootstrapJarUrl(), "agent-runtime.jar"),
+                    new URL(bootstrapJarUrl(), "mozhi-llm-client.jar"),
                     AgentSession.class.getClassLoader());
         }
     }
@@ -126,7 +127,7 @@ public final class AgentSession {
             return new AgentReply(response, agentDetails());
         } catch (RuntimeException | LinkageError exception) {
             String failure = REQUEST_FAILURE_PREFIX
-                    + exception.getClass().getSimpleName() + ": " + exception.getMessage();
+                    + (exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage());
             return new AgentReply(failure, agentDetails());
         }
     }

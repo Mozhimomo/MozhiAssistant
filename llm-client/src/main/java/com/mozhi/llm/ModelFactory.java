@@ -1,4 +1,4 @@
-package com.mozhi.assistant.runtime;
+package com.mozhi.llm;
 
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -7,13 +7,13 @@ import dev.langchain4j.model.openai.OpenAiChatModel;
 
 import java.util.Map;
 
-/** 将配置转换为模型实例；对话和摘要独立设置思考模式、思考强度与输出预算。 */
-final class AgentModelFactory {
-    private AgentModelFactory() {
+/** 将配置转换为模型实例；独立于游戏、会话、工具执行和记忆。 */
+final class ModelFactory {
+    private ModelFactory() {
     }
 
-    static ChatModel createChatModel(AgentConfig config) {
-        int outputLimit = config.contextReserveTokens;
+    static ChatModel createChatModel(LlmConfig config) {
+        int outputLimit = config.outputTokens();
         if (config.maxCompletionTokens != null) {
             outputLimit = config.maxCompletionTokens;
         } else if (config.maxTokens != null) {
@@ -22,7 +22,7 @@ final class AgentModelFactory {
         return createModel(config, outputLimit, config.thinkingMode, config.reasoningEffort);
     }
 
-    static StreamingChatModel createStreamingChatModel(AgentConfig config) {
+    static StreamingChatModel createStreamingChatModel(LlmConfig config) {
         OpenAiStreamingChatModel.OpenAiStreamingChatModelBuilder builder = OpenAiStreamingChatModel.builder()
                 .baseUrl(config.baseUrl)
                 .apiKey(config.apiKey)
@@ -33,7 +33,7 @@ final class AgentModelFactory {
         if (config.maxCompletionTokens != null) {
             builder.maxCompletionTokens(config.maxCompletionTokens);
         } else {
-            builder.maxTokens(config.maxTokens != null ? config.maxTokens : config.contextReserveTokens);
+            builder.maxTokens(config.maxTokens != null ? config.maxTokens : config.outputTokens());
         }
         if (config.temperature != null) {
             builder.temperature(config.temperature);
@@ -56,16 +56,11 @@ final class AgentModelFactory {
         if (config.reasoningEffort != null) builder.reasoningEffort(config.reasoningEffort);
         boolean exchangeThinking = config.exchangeThinking(config.thinkingMode, config.reasoningEffort);
         builder.returnThinking(exchangeThinking).sendThinking(exchangeThinking, "reasoning_content");
-        // 流已开始后不自动重试，避免重复文本或重复工具请求。
+        // 断线恢复由 StreamingModelCall 控制；已输出文字时不自动重试。
         return builder.build();
     }
 
-    static ChatModel createSummaryModel(AgentConfig config) {
-        return createModel(config, config.compressionSummaryTokens,
-                config.summaryThinkingMode, config.summaryReasoningEffort);
-    }
-
-    private static ChatModel createModel(AgentConfig config, int outputLimit, String mode, String effort) {
+    private static ChatModel createModel(LlmConfig config, int outputLimit, String mode, String effort) {
         OpenAiChatModel.OpenAiChatModelBuilder builder = OpenAiChatModel.builder()
                 .baseUrl(config.baseUrl)
                 .apiKey(config.apiKey)
@@ -95,7 +90,7 @@ final class AgentModelFactory {
     }
 
     private static void applyOptionalParameters(
-            OpenAiChatModel.OpenAiChatModelBuilder builder, AgentConfig config) {
+            OpenAiChatModel.OpenAiChatModelBuilder builder, LlmConfig config) {
         if (config.temperature != null) {
             builder.temperature(config.temperature);
         }

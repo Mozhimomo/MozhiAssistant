@@ -13,7 +13,7 @@ import com.mozhi.assistant.runtime.tools.NavigationTools;
 import com.mozhi.assistant.runtime.tools.ProfileMemoryTools;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.chat.StreamingChatModel;
+import com.mozhi.llm.LlmClient;
 import dev.langchain4j.service.tool.ToolExecution;
 
 import java.net.URI;
@@ -35,9 +35,8 @@ public final class ReActLoop implements AgentBridge {
 
     // 初始化后复用的服务。
     private AgentConfig config;
-    private ChatModel model;
-    private ChatModel summaryModel;
-    private StreamingChatModel streamingModel;
+    private LlmClient llmClient;
+    private LlmClient summaryClient;
     private List<Object> tools;
     private ProfileStore profiles;
     private ProfileMemoryTools memoryTools;
@@ -61,9 +60,9 @@ public final class ReActLoop implements AgentBridge {
             // 画像损坏时明确报错，不能用空画像覆盖原文件。
             profiles.read();
 
-            model = AgentModelFactory.createChatModel(config);
-            summaryModel = AgentModelFactory.createSummaryModel(config);
-            streamingModel = config.streamingEnabled ? AgentModelFactory.createStreamingChatModel(config) : null;
+            llmClient = LlmClient.create(config.llm);
+            summaryClient = LlmClient.create(config.llm.withGeneration(config.summaryMaxOutputTokens,
+                    config.summaryThinkingMode, config.summaryReasoningEffort));
             tools = List.of(new DemoTools(gameThread), new ShipTools(gameThread), new SpecTools(gameThread), new NavigationTools(gameThread));
             memoryTools = new ProfileMemoryTools(profiles);
         } catch (RuntimeException exception) {
@@ -102,14 +101,12 @@ public final class ReActLoop implements AgentBridge {
         return AgentCallRequest.builder()
                 .agentId(sessionId)
                 .name("墨汁")
-                .modelName(config.modelName)
+                .modelName(config.llm.modelName())
                 .systemPrompt(config.systemPrompt)
                 .userPrompt(message)
-                .model(model)
-                .summaryModel(summaryModel)
-                .streamingModel(streamingModel)
+                .llmClient(llmClient)
+                .summaryClient(summaryClient)
                 .streamListener(listener == null ? AgentStreamListener.NONE : listener)
-                .streamTimeoutSeconds((int) config.timeout.toSeconds())
                 .tools(tools)
                 .history(new ArrayList<>(history))
                 .contextSummary(summary)
@@ -120,6 +117,7 @@ public final class ReActLoop implements AgentBridge {
                 .compressionTriggerRatio(config.compressionTriggerRatio)
                 .compressionKeepRecentTurns(config.compressionKeepRecentTurns)
                 .compressionSummaryTokens(config.compressionSummaryTokens)
+                .summaryMaxOutputTokens(config.summaryMaxOutputTokens)
                 .build();
     }
 
@@ -168,11 +166,11 @@ public final class ReActLoop implements AgentBridge {
     }
 
     private IllegalStateException sanitized(RuntimeException exception) {
-        String message = exception.getClass().getSimpleName() + ": " + exception.getMessage();
+        String message = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
         return new IllegalStateException(redact(message));
     }
 
     private String redact(String text) {
-        return config == null ? text : text.replace(config.apiKey, "[REDACTED]");
+        return config == null ? text : config.llm.redact(text);
     }
 }

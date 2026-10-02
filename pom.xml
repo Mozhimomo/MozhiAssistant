@@ -6,11 +6,13 @@
     <artifactId>mozhi-assistant-parent</artifactId>
     <version>0.1.0</version>
     <packaging>pom</packaging>
-    <modules><module>bootstrap</module><module>agent-runtime</module></modules>
+    <modules><module>llm-client</module><module>bootstrap</module><module>agent-runtime</module></modules>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>17</maven.compiler.release>
         <maven.compiler.parameters>true</maven.compiler.parameters>
+        <!-- Set true while the game holds installed JARs open; build outputs remain in target/. -->
+        <mozhi.skipDeployment>false</mozhi.skipDeployment>
         <langchain4j.version>1.15.0</langchain4j.version>
         <starsector.core>${maven.multiModuleProjectDirectory}/../../starsector-core</starsector.core>
     </properties>

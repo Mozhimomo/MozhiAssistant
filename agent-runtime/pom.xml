@@ -37,23 +37,12 @@
             <scope>provided</scope>
         </dependency>
 
-        <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j</artifactId>
-            <version>${langchain4j.version}</version>
-        </dependency>
 
+        <!-- All provider configuration and calls live in the reusable infrastructure module. -->
         <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j-open-ai</artifactId>
-            <version>${langchain4j.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-nop</artifactId>
-            <version>2.0.18</version>
-            <scope>runtime</scope>
+            <groupId>com.mozhi</groupId>
+            <artifactId>mozhi-llm-client</artifactId>
+            <version>${project.version}</version>
         </dependency>
 
         <dependency>
@@ -69,55 +58,6 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-                        <configuration>
-                            <createDependencyReducedPom>false</createDependencyReducedPom>
-                            <minimizeJar>false</minimizeJar>
-                            <!-- Runtime dependencies are bundled here for unzip-and-use installs.
-                                 Game/bridge classes must retain the definitions supplied by their owners. -->
-                            <artifactSet>
-                                <excludes>
-                                    <exclude>com.fs.starfarer:*</exclude>
-                                    <exclude>org.lwjgl.lwjgl:*</exclude>
-                                    <exclude>org.lazywizard:console-commands</exclude>
-                                    <exclude>log4j:log4j</exclude>
-                                    <exclude>com.mozhi:mozhi-bootstrap</exclude>
-                                    <exclude>org.projectlombok:lombok</exclude>
-                                </excludes>
-                            </artifactSet>
-                            <filters>
-                                <filter>
-                                    <artifact>*:*</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/*.SF</exclude>
-                                        <exclude>META-INF/*.RSA</exclude>
-                                        <exclude>META-INF/*.DSA</exclude>
-                                        <exclude>module-info.class</exclude>
-                                        <exclude>META-INF/versions/**/module-info.class</exclude>
-                                    </excludes>
-                                </filter>
-                            </filters>
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <manifestEntries>
-                                        <Multi-Release>true</Multi-Release>
-                                    </manifestEntries>
-                                </transformer>
-                            </transformers>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-antrun-plugin</artifactId>
                 <executions>
                     <execution>
@@ -127,7 +67,11 @@
                             <goal>run</goal>
                         </goals>
                         <configuration>
+                            <skip>${mozhi.skipDeployment}</skip>
                             <target>
+                                <mkdir dir="${maven.multiModuleProjectDirectory}/jars"/>
+                                <copy file="${maven.multiModuleProjectDirectory}/llm-client/target/mozhi-llm-client-${project.version}-all.jar"
+                                      tofile="${maven.multiModuleProjectDirectory}/jars/mozhi-llm-client.jar"/>
                                 <copy file="${project.build.directory}/${project.build.finalName}.jar"
                                       tofile="${maven.multiModuleProjectDirectory}/jars/agent-runtime.jar"/>
                             </target>

@@ -1,6 +1,5 @@
-package com.mozhi.assistant.runtime;
+package com.mozhi.llm;
 
-import com.mozhi.assistant.bridge.AgentStreamListener;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
@@ -13,6 +12,9 @@ import dev.langchain4j.model.chat.response.PartialToolCallContext;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.chat.response.StreamingHandle;
 
+import java.io.EOFException;
+import java.net.SocketException;
+import java.net.http.HttpTimeoutException;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -20,26 +22,49 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * 将异步流式 HTTP 响应接回 ReAct 工作线程。
- * 回调只发布文本，工具仍在完整 ChatResponse 到达后由 ReActTurn 执行。
+ * 将异步流式 HTTP 响应接回调用线程。
+ * 回调只发布文本，工具仍在完整 ChatResponse 到达后交给调用方处理。
  */
 final class StreamingModelCall implements StreamingChatResponseHandler {
-    private final AgentStreamListener listener;
+    private final LlmStreamListener listener;
     private final CompletableFuture<ChatResponse> completed = new CompletableFuture<>();
     private volatile StreamingHandle handle;
     private volatile boolean stopped;
+    private volatile boolean publishedText;
 
-    private StreamingModelCall(AgentStreamListener listener) {
+    private StreamingModelCall(LlmStreamListener listener) {
         this.listener = listener;
     }
 
     static ChatResponse execute(
             StreamingChatModel model, ChatRequest request,
-            AgentStreamListener listener, int timeoutSeconds) {
-        StreamingModelCall call = new StreamingModelCall(listener);
+            LlmStreamListener listener, int timeoutSeconds) {
+        for (int attempt = 0; ; attempt++) {
+            checkInterrupted();
+            StreamingModelCall call = new StreamingModelCall(listener);
+            try {
+                return call.awaitResponse(model, request, timeoutSeconds);
+            } catch (RuntimeException exception) {
+                // 只重发当前模型请求，完整响应到达前工具尚未执行；不重跑整个 ReAct 轮次。
+                if (attempt != 0 || call.publishedText || !isTransientConnectionFailure(exception)) {
+                    throw exception;
+                }
+                checkInterrupted();
+                listener.onStatus("连接中断，正在重新连接（1/1）……");
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new CancellationException("流式请求已取消");
+                }
+            }
+        }
+    }
+
+    private ChatResponse awaitResponse(StreamingChatModel model, ChatRequest request, int timeoutSeconds) {
         try {
-            model.chat(request, call);
-            return call.completed.get(timeoutSeconds, TimeUnit.SECONDS);
+            model.chat(request, this);
+            return completed.get(timeoutSeconds, TimeUnit.SECONDS);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new CancellationException("流式请求已取消");
@@ -49,13 +74,14 @@ final class StreamingModelCall implements StreamingChatResponseHandler {
             Throwable cause = exception.getCause();
             throw new IllegalStateException("流式请求失败：" + cause.getMessage(), cause);
         } finally {
-            call.stop();
+            stop();
         }
     }
 
     @Override
-    public void onPartialResponse(String text) {
-        if (!stopped) {
+    public synchronized void onPartialResponse(String text) {
+        if (!stopped && !completed.isDone() && text != null && !text.isEmpty()) {
+            publishedText = true;
             listener.onPartialText(text);
         }
     }
@@ -91,6 +117,24 @@ final class StreamingModelCall implements StreamingChatResponseHandler {
         }
     }
 
+    private static void checkInterrupted() {
+        if (Thread.currentThread().isInterrupted()) throw new CancellationException("流式请求已取消");
+    }
+
+    private static boolean isTransientConnectionFailure(Throwable exception) {
+        // 不重试鉴权、参数校验等错误，也不重试已取消的请求。
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof CancellationException || cause instanceof InterruptedException) {
+                return false;
+            }
+            if (cause instanceof SocketException || cause instanceof EOFException
+                    || cause instanceof HttpTimeoutException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void captureHandle(StreamingHandle value) {
         handle = value;
         // 在首个片段到达之前被取消，也不能让该流继续输出。
@@ -100,9 +144,13 @@ final class StreamingModelCall implements StreamingChatResponseHandler {
     }
 
     private void stop() {
-        stopped = true;
-        StreamingHandle current = handle;
-        if (current != null && !completed.isDone()) {
+        StreamingHandle current;
+        synchronized (this) {
+            // 与发布文本互斥；退出后旧请求不再向监听器写入。
+            stopped = true;
+            current = handle;
+        }
+        if (current != null && (!completed.isDone() || completed.isCompletedExceptionally())) {
             current.cancel();
         }
     }

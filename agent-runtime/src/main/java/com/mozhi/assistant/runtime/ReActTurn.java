@@ -1,5 +1,6 @@
 package com.mozhi.assistant.runtime;
 
+import com.mozhi.llm.LlmStreamListener;
 import com.mozhi.assistant.runtime.model.AgentCallRequest;
 import com.mozhi.assistant.runtime.model.AgentCallResponse;
 import com.mozhi.assistant.runtime.tools.ProfileMemoryTools;
@@ -133,15 +134,14 @@ final class ReActTurn {
             builder.maxOutputTokens(request.getMaxTokens());
         }
 
-        request.getStreamListener().onResponseStart();
-        ChatRequest chatRequest = builder.build();
-        ChatResponse response;
-        if (request.getStreamingModel() != null) {
-            response = StreamingModelCall.execute(request.getStreamingModel(), chatRequest,
-                    request.getStreamListener(), request.getStreamTimeoutSeconds());
-        } else {
-            response = request.getModel().chat(chatRequest);
-        }
+        ChatResponse response = request.getLlmClient().stream(builder.build(), new LlmStreamListener() {
+            @Override
+            public void onResponseStart() { request.getStreamListener().onResponseStart(); }
+            @Override
+            public void onPartialText(String text) { request.getStreamListener().onPartialText(text); }
+            @Override
+            public void onStatus(String status) { request.getStreamListener().onStatus(status); }
+        });
         context.addUsage(response.tokenUsage());
         ContextCompressor.checkInterrupted();
         return response;
@@ -255,8 +255,8 @@ final class ReActTurn {
     }
 
     private void validateRequest() {
-        if (request == null || request.getModel() == null) {
-            throw new IllegalArgumentException("ChatModel 未配置");
+        if (request == null || request.getLlmClient() == null) {
+            throw new IllegalArgumentException("LlmClient 未配置");
         }
         if (request.getUserPrompt() == null || request.getUserPrompt().isBlank()) {
             throw new IllegalArgumentException("用户消息不能为空");
@@ -268,8 +268,8 @@ final class ReActTurn {
         if (request.getMaxSteps() < 1 || request.getMaxSteps() > 101) {
             throw new IllegalArgumentException("maxSteps 必须为 1–101");
         }
-        if (request.getStreamListener() == null || request.getStreamTimeoutSeconds() < 1) {
-            throw new IllegalArgumentException("流式监听器不能为空，超时必须为正数");
+        if (request.getStreamListener() == null) {
+            throw new IllegalArgumentException("流式监听器不能为空");
         }
         validateContextBudget();
     }
@@ -282,6 +282,10 @@ final class ReActTurn {
         }
 
         int summaryTokens = request.getCompressionSummaryTokens();
+        if (request.getSummaryMaxOutputTokens() < summaryTokens
+                || request.getSummaryMaxOutputTokens() > windowTokens - 2048) {
+            throw new IllegalArgumentException("summaryMaxOutputTokens 须不小于摘要长度，且至少留出 2048 输入预算");
+        }
         double triggerRatio = request.getCompressionTriggerRatio();
         boolean invalidSummaryBudget = summaryTokens < 128 || summaryTokens > (windowTokens - 2048) / 2;
         boolean invalidTrigger = !Double.isFinite(triggerRatio) || triggerRatio < 0.1 || triggerRatio >= 1;
