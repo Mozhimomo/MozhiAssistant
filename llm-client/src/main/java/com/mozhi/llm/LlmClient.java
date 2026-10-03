@@ -22,6 +22,9 @@ public interface LlmClient {
 
     ChatResponse chat(ChatRequest request);
 
+    /** 创建无会话记忆的同步 AI Service；公开接口的方法可直接返回 POJO 或 record。 */
+    <T> T aiService(Class<T> serviceType);
+
     /** streamingEnabled=false 或未提供流式模型时，同步调用后发布完整正文。 */
     ChatResponse stream(ChatRequest request, LlmStreamListener listener);
 

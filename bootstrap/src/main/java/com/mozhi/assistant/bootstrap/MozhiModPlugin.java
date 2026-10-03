@@ -13,6 +13,7 @@ public final class MozhiModPlugin extends BaseModPlugin {
     @Override
     public void onGameLoad(boolean newGame) {
         AgentSession.reset();
+        FleetAgentHost.reset();
         // Old saves must resolve the retired class before onGameLoad can remove its entries.
         for (IntelInfoPlugin oldIntel : new ArrayList<>(
                 Global.getSector().getIntelManager().getIntel(AgentDemoIntel.class))) {
@@ -25,11 +26,17 @@ public final class MozhiModPlugin extends BaseModPlugin {
         ChatHotkeyListener.clearPending();
     }
 
+    @Override
+    public void beforeGameSave() {
+        FleetAgentHost.save();
+    }
+
     public static final class ReplyPoller implements EveryFrameScript {
         @Override public boolean isDone() { return false; }
         @Override public boolean runWhilePaused() { return true; }
         @Override public void advance(float amount) {
             ChatHotkeyListener.openPending();
+            FleetAgentHost.advance(amount);
             AgentSession session = AgentSession.current();
             if (session.poll() && session.reportsToConsole()) {
                 Console.showMessage(session.resultText());

@@ -84,6 +84,31 @@ ChatResponse response = client.stream(request, new LlmStreamListener() {
 
 同步重试由 `maxRetries` 控制。流式连接异常在尚未发布正文时独立重试一次；已发布正文则失败并保留片段，不自动重跑业务或工具。流式总等待上限为每次尝试的 `timeoutSeconds`，调用线程中断可取消等待。
 
+### 类型化输出（AI Services）
+
+定义公开接口，方法直接返回 Java POJO 或 record，再通过本库创建 LangChain4j AI Service：
+
+```java
+public record ShipChoice(String hullId, String reason) {}
+
+public interface ShipAdvisor {
+    @dev.langchain4j.service.SystemMessage("根据输入需求推荐一艘舰船，并说明原因。")
+    ShipChoice choose(@dev.langchain4j.service.UserMessage String request);
+}
+
+ShipAdvisor advisor = client.aiService(ShipAdvisor.class);
+ShipChoice choice = advisor.choose("需要一艘便宜的护航舰");
+```
+
+上述公开类型分别放在对应的 Java 文件中。接口和返回类型都应在私有运行区加载；它们可以包含嵌套对象、列表与枚举。框架负责格式要求和反序列化，业务代码仍需校验结果。该入口提供同步、无历史记忆的服务，不自动执行工具；后台线程调用，沿用客户端连接参数、模型重试、私有类加载上下文及异常脱敏。
+
+在配置中设置 `structuredOutputMode`：
+
+- `prompt`（默认）：LangChain4j 根据返回类型自动生成格式提示，然后解析为对象，适用于不支持原生 Schema 的兼容接口。
+- `json_schema`：启用模型的 `RESPONSE_FORMAT_JSON_SCHEMA` 和严格 Schema，AI Services 自动从返回类型生成 Schema。需要服务端支持；不支持时会报错，不静默降级。
+
+两种模式都是类型化调用；服务端 Schema 约束只在第二种模式启用。此设置不会把普通 `chat` / `stream` 对话强制变成 JSON。通过 `LlmClient.of(...)` 提供自建模型时，由该模型声明 `supportedCapabilities()`。
+
 ### 派生不同用途的配置
 
 ```java
@@ -136,10 +161,12 @@ javac -encoding UTF-8 --release 17 -cp target/mozhi-llm-client-0.1.0-all.jar -d 
 
 仅编译示例不发送模型请求。填写自己的配置后可自行运行 `example.IsolatedChatExample`。
 
+构建后运行 `./verify.ps1` 可离线检查类型化输出、Schema 配置、类加载上下文恢复、错误脱敏和取消，不请求模型服务。
+
 ## 配置兼容
 
 使用现有 agent.properties 中的连接字段即可；额外业务字段会被忽略。支持：
 
-`baseUrl`、`modelName`、`apiKey`、`timeoutSeconds`、`streamingEnabled`、`maxRetries`、`maxTokens` / `maxCompletionTokens`（二选一）、`temperature`、`topP`、`presencePenalty`、`frequencyPenalty`、`seed`、`thinkingMode`、`reasoningEffort`。
+`baseUrl`、`modelName`、`apiKey`、`timeoutSeconds`、`streamingEnabled`、`structuredOutputMode`、`maxRetries`、`maxTokens` / `maxCompletionTokens`（二选一）、`temperature`、`topP`、`presencePenalty`、`frequencyPenalty`、`seed`、`thinkingMode`、`reasoningEffort`。
 
 `apiKey` 可直接填真实密钥，或填写 `${MOZHI_API_KEY}` 等环境变量引用。库不记录 HTTP 请求/响应日志，配置创建的客户端会脱敏抛出的错误信息。

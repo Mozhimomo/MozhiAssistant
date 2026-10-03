@@ -4,7 +4,11 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.service.AiServices;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.Proxy;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
@@ -48,6 +52,29 @@ final class DefaultLlmClient implements LlmClient {
     }
 
     @Override
+    public <T> T aiService(Class<T> serviceType) {
+        Objects.requireNonNull(serviceType, "serviceType");
+        if (!serviceType.isInterface() || !Modifier.isPublic(serviceType.getModifiers())) {
+            throw new IllegalArgumentException("AI Service 必须是 public interface");
+        }
+        T service = invoke(() -> AiServices.create(serviceType, new AiServiceResponseModel(model)));
+        // 将整个调用（包括格式生成、反序列化）留在私有加载区，并统一脱敏异常。
+        return serviceType.cast(Proxy.newProxyInstance(serviceType.getClassLoader(),
+                new Class<?>[]{serviceType}, (proxy, method, args) -> invoke(() -> {
+                    try {
+                        return method.invoke(service, args);
+                    } catch (InvocationTargetException exception) {
+                        Throwable cause = exception.getCause();
+                        if (cause instanceof RuntimeException runtime) throw runtime;
+                        if (cause instanceof Error error) throw error;
+                        throw new IllegalStateException(cause == null ? "AI Service 调用失败" : cause.getMessage());
+                    } catch (IllegalAccessException exception) {
+                        throw new IllegalStateException("无法访问 AI Service 方法");
+                    }
+                })));
+    }
+
+    @Override
     public ChatResponse stream(ChatRequest request, LlmStreamListener listener) {
         Objects.requireNonNull(request, "request");
         LlmStreamListener sink = listener == null ? LlmStreamListener.NONE : listener;
@@ -64,12 +91,12 @@ final class DefaultLlmClient implements LlmClient {
         });
     }
 
-    private ChatResponse invoke(Supplier<ChatResponse> operation) {
+    private <T> T invoke(Supplier<T> operation) {
         if (Thread.currentThread().isInterrupted()) throw new CancellationException("请求已取消");
         ClassLoader previous = Thread.currentThread().getContextClassLoader();
         try {
             Thread.currentThread().setContextClassLoader(DefaultLlmClient.class.getClassLoader());
-            ChatResponse response = operation.get();
+            T response = operation.get();
             if (response == null) throw new IllegalStateException("模型返回空响应");
             return response;
         } catch (CancellationException exception) {

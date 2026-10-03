@@ -11,6 +11,7 @@ import com.mozhi.assistant.runtime.tools.ShipTools;
 import com.mozhi.assistant.runtime.tools.SpecTools;
 import com.mozhi.assistant.runtime.tools.NavigationTools;
 import com.mozhi.assistant.runtime.tools.ProfileMemoryTools;
+import com.mozhi.assistant.runtime.tools.FleetCommandTools;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import com.mozhi.llm.LlmClient;
@@ -63,7 +64,7 @@ public final class ReActLoop implements AgentBridge {
             llmClient = LlmClient.create(config.llm);
             summaryClient = LlmClient.create(config.llm.withGeneration(config.summaryMaxOutputTokens,
                     config.summaryThinkingMode, config.summaryReasoningEffort));
-            tools = List.of(new DemoTools(gameThread), new ShipTools(gameThread), new SpecTools(gameThread), new NavigationTools(gameThread));
+            tools = List.of(new DemoTools(gameThread), new ShipTools(gameThread), new SpecTools(gameThread), new NavigationTools(gameThread), new FleetCommandTools(gameThread));
             memoryTools = new ProfileMemoryTools(profiles);
         } catch (RuntimeException exception) {
             throw sanitized(exception);

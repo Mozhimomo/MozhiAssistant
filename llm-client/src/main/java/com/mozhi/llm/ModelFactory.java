@@ -6,6 +6,7 @@ import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 
 import java.util.Map;
+import static dev.langchain4j.model.chat.Capability.RESPONSE_FORMAT_JSON_SCHEMA;
 
 /** 将配置转换为模型实例；独立于游戏、会话、工具执行和记忆。 */
 final class ModelFactory {
@@ -81,6 +82,9 @@ final class ModelFactory {
         boolean exchangeThinking = config.exchangeThinking(mode, effort);
         builder.returnThinking(exchangeThinking).sendThinking(exchangeThinking, "reasoning_content");
         applyOptionalParameters(builder, config);
+        if (config.structuredOutputJsonSchema) {
+            builder.supportedCapabilities(RESPONSE_FORMAT_JSON_SCHEMA).strictJsonSchema(true);
+        }
         return builder.build();
     }
 

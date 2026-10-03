@@ -35,6 +35,19 @@ longTermMemoryFile=../memory/user-profile.json
 # 游戏聊天启用流式回复；服务不支持流式时可设为 false。
 streamingEnabled=true
 
+# 类型化 AI Service 输出：prompt 由框架自动生成格式提示；json_schema 使用服务端 Schema 约束。
+# 默认 prompt 兼容更多接口；仅在模型服务明确支持 JSON Schema 时使用 json_schema。
+# 普通聊天和工具调用不因此强制改为 JSON 输出。
+structuredOutputMode=prompt
+
+# 舰队子智能体：步骤前后检查目标；长步骤按游戏日及实际秒数限频检查。
+fleetReviewIntervalDays=1
+fleetReviewMinIntervalSeconds=30
+# 航行/跟随连续多久没有进展时触发重规划（游戏日）。
+fleetStallDays=3
+# 同一原始任务最多自动重规划次数，达到上限后显示原因并等待新指令。
+fleetMaxReplans=3
+
 # 思考模式（对话与摘要互相独立；留空则不发送参数，不互相继承）。
 # thinkingMode / summaryThinkingMode: enabled 或 disabled；用于 DeepSeek thinking.type 协议。
 # reasoningEffort / summaryReasoningEffort: none/minimal/low/medium/high/xhigh/max，具体支持范围由服务商决定。

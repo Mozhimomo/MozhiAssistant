@@ -6,7 +6,7 @@
     <artifactId>mozhi-assistant-parent</artifactId>
     <version>0.1.0</version>
     <packaging>pom</packaging>
-    <modules><module>llm-client</module><module>bootstrap</module><module>agent-runtime</module></modules>
+    <modules><module>llm-client</module><module>bootstrap</module><module>fleet-agent</module><module>agent-runtime</module></modules>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>17</maven.compiler.release>

@@ -29,6 +29,7 @@ public final class LlmConfig {
     final Integer seed;
     final String thinkingMode;
     final String reasoningEffort;
+    final boolean structuredOutputJsonSchema;
 
     private LlmConfig(Properties properties) {
         values = new Properties();
@@ -56,6 +57,8 @@ public final class LlmConfig {
         maxRetries = integerOrDefault(properties, "maxRetries", 0, 0, 10);
         thinkingMode = thinkingMode(properties, "thinkingMode");
         reasoningEffort = reasoningEffort(properties, "reasoningEffort");
+        structuredOutputJsonSchema = "json_schema".equals(optionalChoice(properties,
+                "structuredOutputMode", Set.of("prompt", "json_schema")));
         validateThinking("生成", thinkingMode, reasoningEffort);
     }
 

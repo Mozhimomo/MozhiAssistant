@@ -1,11 +1,12 @@
 **/target/
 /.mvn/repository/
 /.mvn/verification-settings.xml
-# Keep game libraries out; ship bootstrap, agent and shared LLM runtime JARs.
+# Keep game libraries out; ship bootstrap, chat agent, fleet agent and shared LLM runtime JARs.
 /jars/*.jar
 !/jars/mozhi-bootstrap.jar
 !/jars/agent-runtime.jar
 !/jars/mozhi-llm-client.jar
+!/jars/fleet-agent.jar
 /lib/
 **/.idea/
 *.iml

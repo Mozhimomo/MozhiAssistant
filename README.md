@@ -26,7 +26,7 @@ LangChain4j 等运行依赖已包含在 `jars/mozhi-llm-client.jar` 中，玩家
 | 模型服务 | 支持 OpenAI 兼容 Chat Completions 接口，并支持 **工具调用（Tool Calling）** |
 | 网络 | 对话时需要能访问所配置的模型服务 |
 
-仓库同时提供源码和 `jars/` 下的三个运行 JAR。普通玩家无需安装 Maven 或自行下载 LangChain4j。
+仓库同时提供源码和 `jars/` 下的四个运行 JAR。普通玩家无需安装 Maven 或自行下载 LangChain4j。
 模型服务地址、模型名称和 API key 需要自行配置，游戏本体和 Console Commands 需自行安装。
 
 ## 快速开始（玩家）
@@ -46,13 +46,15 @@ Starsector/
         ├── jars/
         │   ├── mozhi-bootstrap.jar
         │   ├── agent-runtime.jar
-        │   └── mozhi-llm-client.jar
+        │   ├── mozhi-llm-client.jar
+        │   └── fleet-agent.jar
         ├── data/
         │   └── config/agent.properties.example
         └── graphics/
 ```
 
 - `mozhi-bootstrap.jar`：游戏插件入口、聊天 UI 和类加载桥接。
+- `fleet-agent.jar`：独立舰队 Plan-and-Execute 框架：放出、跟随与召回合并。
 - `agent-runtime.jar`：智能体逻辑、工具、上下文压缩和记忆，不内嵌 LLM 包。
 - `mozhi-llm-client.jar`：独立 LLM 基础设施及 **LangChain4j、Jackson、SLF4J 等运行依赖**，供 agent 调用，也可供其他项目复用。
 
@@ -83,6 +85,14 @@ apiKey=你的真实密钥
 4. 输入问题并发送，例如：“查看我当前的舰队，介绍一下各艘船的配装。”
 
 也可以在 Console Commands 控制台输入 `MozhiAgent chat`，然后关闭控制台打开聊天。
+
+### 原生舰队跟随测试
+
+在战役控制台输入 `MozhiFleetFollow`，对玩家当前所在地点、半径 3000 范围内的舰队直接下达 `FOLLOW`。可指定半径，例如 `MozhiFleetFollow 5000`。
+
+指令只执行一次 `fleet.clearAssignments()` 和 `fleet.addAssignment(FleetAssignment.FOLLOW, player, 100000f, text)`，不经过舰队 agent 或规划器，也不修改阵营关系、AI 模式或战斗行为。包括范围内的敌对舰队，但跳过玩家、空间站、已失效舰队及正在战斗/跃迁的舰队。
+
+控制台会列出舰队名称、ID、距离和下达后的当前任务。关闭控制台、解除暂停后观察；原生 AI、其他脚本或墨汁当前计划仍可能覆盖这次任务。
 
 ## 更新 Mod
 
@@ -270,13 +280,13 @@ summaryReasoningEffort=
 
 ### 下载后缺少 jars 中的运行文件
 
-检查是否完整解压了仓库 ZIP，三个运行 JAR 应与 `mod_info.json`、`data/`、`graphics/` 一起保留。
-如果下载的版本本身没有这三个文件，该版本就不能直接运行，需要包含运行 JAR 的版本；
+检查是否完整解压了仓库 ZIP，四个运行 JAR 应与 `mod_info.json`、`data/`、`graphics/` 一起保留。
+如果下载的版本本身没有这四个文件，该版本就不能直接运行，需要包含运行 JAR 的版本；
 开发者可按“从源码编译”章节重新构建。
 
 ### 快捷键没有反应
 
-确认两个 Mod 均已启用，`jars/` 中包含 `mozhi-bootstrap.jar`、`agent-runtime.jar` 和 `mozhi-llm-client.jar`，且已经进入战役地图。
+确认两个 Mod 均已启用，`jars/` 中包含 `mozhi-bootstrap.jar`、`agent-runtime.jar`、`mozhi-llm-client.jar` 和 `fleet-agent.jar`，且已经进入战役地图。
 尝试使用 `MozhiAgent chat`，关闭控制台后再操作。
 
 ### 密钥错误或环境变量读取失败
@@ -341,10 +351,10 @@ mvn -Dmaven.test.skip=true clean package
 mvn "-Dstarsector.core=D:/Games/Starsector/starsector-core" "-Dconsole.jar=D:/Games/Starsector/mods/Console Commands/jars/lw_Console.jar" -Dmaven.test.skip=true clean package
 ```
 
-将路径替换为自己的实际路径。根项目执行 `package` 后自动更新 `jars/mozhi-bootstrap.jar`、`jars/agent-runtime.jar` 和 `jars/mozhi-llm-client.jar`。
+将路径替换为自己的实际路径。根项目执行 `package` 后自动更新 `jars/mozhi-bootstrap.jar`、`jars/agent-runtime.jar`、`jars/mozhi-llm-client.jar` 和 `jars/fleet-agent.jar`。
 只有 LLM 包通过 Maven Shade 合并第三方运行依赖并保留服务发现资源。agent 是普通业务 JAR，必须与 LLM 包一起加载；游戏库、桥接模块和 Lombok 不打入 LLM 包。
 
-**提交代码更新时，同步提交重新构建的这三个 JAR**，使仓库 ZIP 中的运行文件与源码一致。
+**提交代码更新时，同步提交重新构建的这四个 JAR**，使仓库 ZIP 中的运行文件与源码一致。
 本地模型配置、记忆、游戏依赖、Maven 缓存和 `target/` 构建目录仍不提交。
 更新 JAR 前请完全退出游戏，Windows 无法覆盖游戏映射使用的 JAR。游戏运行中只编译、不复制到安装目录时，可以使用：
 
@@ -352,7 +362,29 @@ mvn "-Dstarsector.core=D:/Games/Starsector/starsector-core" "-Dconsole.jar=D:/Ga
 mvn -Dmozhi.skipDeployment=true -Dmaven.test.skip=true package
 ```
 
-此时新产物仅在各模块的 `target/` 目录；退出游戏后，在根目录重新执行不带跳过参数的 `mvn package`，将三个运行 JAR 一起更新。
+此时新产物仅在各模块的 `target/` 目录；退出游戏后，在根目录重新执行不带跳过参数的 `mvn package`，将四个运行 JAR 一起更新。
+
+## 墨汁独立舰队
+
+舰队 agent 使用 **Plan-and-Execute** 框架，支持放出舰队、跟随玩家、前往指定星球/星系/市场、按命令买卖商品或舰船，以及召回合并。
+
+它作为聊天智能体的子智能体运行：主智能体通过 `delegateToFleetAgent` 委派完整原始任务，舰队子智能体在新计划开始前、步骤完成后和长步骤执行期间检查目标。偏离目的、原生任务被改向或长期无进展会触发 Replan；原始目标、已完成交易和跟随进度保留，只重新规划剩余工作。界面显示目标检查原因和重规划次数，聊天智能体通过状态工具读取结果。
+
+`agent.properties` 可配置 `fleetReviewIntervalDays=1`、`fleetReviewMinIntervalSeconds=30`、`fleetStallDays=3`、`fleetMaxReplans=3`。自动检查会产生额外模型请求；同一任务达到重规划上限或无法继续时显示原因并等待新指令。
+
+放出前，在聊天中指定舰船名称/实例 ID，并明确划拨信用点、补给、燃料和船员。舰船与军官从玩家舰队实际转移，放出后默认持续跟随玩家；玩家必须保留旗舰及至少一艘船。
+
+可以说“墨汁跟着我”“跟随我 3 天，然后回来合并”或“现在召回墨汁”。跟随后召回是一份两步计划：`FOLLOW_PLAYER → RETURN`。召回在同一个执行器中执行，实际抵达玩家附近后才合并剩余舰船、军官、货物和资金。
+
+也可以说“去 Jangala 买 100 个补给，再去 Asharu 卖 50 个补给，然后回来合并”。计划顺序为 `MOVE_TO → BUY → MOVE_TO → SELL → RETURN`：移动步骤必须实际进入目标环绕轨道才完成，买卖步骤只在对应市场交易，不包含航行。按当时真实库存和价格转移实物、结算分舰队信用点。目的地及商品支持名称/ID；不加入资金储备、CR 或补给策略判断。库存不足或余额不够时明确失败，不假装成交。交易细节与限制见舰队 Agent 文档。
+
+`FleetPlanner` 通过 `LlmClient.aiService(...)` 调用 LangChain4j AI Services，直接取得 `FleetPlanDraft` / `FleetPlanStepDraft` 对象，校验后转换为保存执行进度的 `FleetPlan` / `FleetPlanStep`，再由 `FleetPlanExecutor` 逐步执行。模型不能填写执行进度与结果。参数化命令直接建立计划，目标检查与自动重规划仍使用模型；沿用 `agent.properties` 的连接配置。
+
+类型化规划默认使用 `structuredOutputMode=prompt`，由框架自动生成格式要求并转换对象。模型服务支持原生 JSON Schema 时可设为 `json_schema`，使用服务端格式约束；普通聊天仍保留自然语言输出。
+
+聊天窗口保留舰队状态与计划面板，显示实时资源、当前步骤和跟随进度；窄窗口点击“舰队计划”查看。计划随战役存档保存，新对话不影响分舰队。
+
+详细说明见 [舰队 Agent 文档](fleet-agent/README.md)。
 
 ## 数据与源码
 
@@ -360,13 +392,14 @@ mvn -Dmozhi.skipDeployment=true -Dmaven.test.skip=true package
 短期会话不写入存档；长期画像以 JSON 保存，默认 `data/memory/` 已被 Git 忽略。
 如果将画像改到其他目录，请同步检查忽略规则。
 
-项目分为三个 Maven 模块：
+项目分为四个 Maven 模块：
 
 | 位置 | 职责 |
 | --- | --- |
 | `bootstrap/` | 游戏插件入口、聊天 UI、主线程调度、类加载器及桥接接口 |
 | `llm-client/` | 可单独引入的 LLM 基础设施：模型连接配置、同步/流式调用、重试及通用隔离加载入口 |
 | `agent-runtime/` | ReAct 循环、工具执行、上下文压缩和记忆，通过 LlmClient 调用模型 |
+| `fleet-agent/` | 独立舰队规划与执行，通过 LlmClient 调用模型；主线程控制真实舰队 |
 | `agent-runtime/.../runtime/tools/` | 舰队、规格、记忆、星球和购买导航工具 |
 | `data/config/agent.properties.example` | 可提交的配置模板 |
 | `data/console/commands.csv` | Console Commands 命令注册 |
@@ -376,5 +409,5 @@ mvn -Dmozhi.skipDeployment=true -Dmaven.test.skip=true package
 工具经 `ToolInjector` 和 `ToolRegistry` 注册，需要访问游戏数据的操作通过 `GameThreadAccess` 回到主线程。
 
 运行时采用独立类加载器加载 LangChain4j 等依赖，并与游戏共享桥接接口和游戏 API 类型。
-`mod_info.json` 只列出 `mozhi-bootstrap.jar`；**不要把 `agent-runtime.jar` 或 `mozhi-llm-client.jar` 添加到其 `jars` 数组**。
+`mod_info.json` 只列出 `mozhi-bootstrap.jar`；**不要把 `agent-runtime.jar`、`mozhi-llm-client.jar` 或 `fleet-agent.jar` 添加到其 `jars` 数组**。
 类加载隔离不是恶意代码沙箱，也不解除 Java 模块的强封装限制。
