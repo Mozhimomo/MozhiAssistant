@@ -1,17 +1,20 @@
 package com.mozhi.assistant.bootstrap;
 
 import com.mozhi.assistant.bridge.AgentBridge;
+import com.mozhi.assistant.bridge.FleetAgentAccess;
 
 import java.io.IOException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Supplier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /** 游戏主线程持有显示状态；单个后台线程持有 Agent、类加载器和模型会话。 */
-public final class AgentSession {
+public final class AgentSession implements AutoCloseable {
     private static final int MAX_DISPLAY_MESSAGES = 100;
     private static final String AGENT_ENTRY_CLASS = "com.mozhi.assistant.runtime.ReActLoop";
     private static final String REQUEST_FAILURE_PREFIX = "请求失败：";
@@ -43,6 +46,17 @@ public final class AgentSession {
     private long nextMessageId;
     private String draft = "";
     private boolean reportToConsole;
+    private final Supplier<Map<String, Object>> fleetView;
+    private long nextFleetPoll;
+    private FleetIntervention queuedIntervention, sentIntervention, activeIntervention;
+
+    public AgentSession() { this(null, FleetAgentAccess::view); }
+
+    /** 无网络回归检查使用同一异步队列和消息展示路径。 */
+    AgentSession(AgentBridge agent, Supplier<Map<String, Object>> fleetView) {
+        this.agent = agent;
+        this.fleetView = fleetView;
+    }
 
     public record ChatMessage(long id, String speaker, String text) {
     }
@@ -75,6 +89,12 @@ public final class AgentSession {
         }
         reportToConsole = consoleOutput;
         appendMessage("舰长", message);
+        startRequest(message, null);
+        return true;
+    }
+
+    private void startRequest(String message, FleetIntervention intervention) {
+        activeIntervention = intervention;
         status = "墨汁正在思考，请稍候……";
         answer = "";
         details = "";
@@ -84,20 +104,19 @@ public final class AgentSession {
         ReplyStream stream = new ReplyStream();
         replyStream = stream;
         nextStreamRefreshNanos = 0;
-        pending = worker.submit(() -> executeRequest(message, stream));
-        return true;
+        pending = worker.submit(() -> executeRequest(message, stream, intervention != null));
     }
 
     /** 框架初始化、服务发现和工具反射都必须使用私有运行区加载器。 */
-    private AgentReply executeRequest(String message, ReplyStream stream) throws Exception {
+    private AgentReply executeRequest(String message, ReplyStream stream, boolean notification) throws Exception {
         ClassLoader previous = Thread.currentThread().getContextClassLoader();
         try {
-            ensureRuntimeLoader();
-            Thread.currentThread().setContextClassLoader(loader);
             if (agent == null) {
+                ensureRuntimeLoader();
+                Thread.currentThread().setContextClassLoader(loader);
                 initializeAgent();
-            }
-            return callAgent(message, stream);
+            } else if (loader != null) Thread.currentThread().setContextClassLoader(loader);
+            return callAgent(message, stream, notification);
         } finally {
             Thread.currentThread().setContextClassLoader(previous);
         }
@@ -121,9 +140,9 @@ public final class AgentSession {
         agent = candidate;
     }
 
-    private AgentReply callAgent(String message, ReplyStream stream) {
+    private AgentReply callAgent(String message, ReplyStream stream, boolean notification) {
         try {
-            String response = agent.chat(message, stream);
+            String response = notification ? agent.notifyFleetIntervention(message, stream) : agent.chat(message, stream);
             return new AgentReply(response, agentDetails());
         } catch (RuntimeException | LinkageError exception) {
             String failure = REQUEST_FAILURE_PREFIX
@@ -143,6 +162,7 @@ public final class AgentSession {
     /** 每帧由游戏主线程调用，不等待尚未完成的网络请求。 */
     public boolean poll() {
         gameQueries.advance();
+        pollFleetIntervention();
         drainStream(pending != null && pending.isDone());
         if (pending == null || !pending.isDone()) {
             return false;
@@ -153,12 +173,35 @@ public final class AgentSession {
             displayInitializationFailure(exception);
         } finally {
             pending = null;
+            activeIntervention = null;
             if (replyStream != null) {
                 replyStream.close();
                 replyStream = null;
             }
         }
         return true;
+    }
+
+    private void pollFleetIntervention() {
+        long now = System.nanoTime();
+        if (now >= nextFleetPoll) {
+            nextFleetPoll = now + 500_000_000L;
+            observeFleet(FleetIntervention.from(fleetView.get()));
+        }
+        if (pending != null || queuedIntervention == null) return;
+        // 队列等待期间玩家可能已下达新任务，发送前重新检查当前状态。
+        observeFleet(FleetIntervention.from(fleetView.get()));
+        if (queuedIntervention == null) return;
+        FleetIntervention event = queuedIntervention;
+        sentIntervention = event;
+        queuedIntervention = null;
+        reportToConsole = false;
+        startRequest(event.snapshot(), event);
+    }
+
+    private void observeFleet(FleetIntervention event) {
+        if (event == null) { queuedIntervention = null; sentIntervention = null; }
+        else queuedIntervention = event.equals(sentIntervention) ? null : event;
     }
 
     private void displayReply(AgentReply reply) {
@@ -168,7 +211,7 @@ public final class AgentSession {
         status = failed ? "请求失败，可重试或重置会话。" : "已收到回复。";
         if (failed) {
             markIncompleteReply();
-            appendMessage("系统", answer);
+            appendMessage("系统", notificationFailure() + answer);
         } else {
             updateReplyText(answer);
         }
@@ -178,10 +221,14 @@ public final class AgentSession {
         Throwable cause = exception.getCause() == null ? exception : exception.getCause();
         status = "初始化失败：" + cause.getClass().getSimpleName() + ": " + cause.getMessage();
         markIncompleteReply();
-        appendMessage("系统", status);
+        appendMessage("系统", notificationFailure() + status);
         if (exception instanceof InterruptedException) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private String notificationFailure() {
+        return activeIntervention == null ? "" : "舰队需要你介入，墨汁暂时未能生成说明。\n" + activeIntervention.snapshot() + "\n";
     }
 
     public String status() {
@@ -263,7 +310,7 @@ public final class AgentSession {
         updateReplyText(text);
     }
 
-    private void close() {
+    @Override public void close() {
         if (replyStream != null) {
             replyStream.close();
         }

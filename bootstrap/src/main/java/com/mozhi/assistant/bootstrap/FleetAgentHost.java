@@ -24,7 +24,7 @@ final class FleetAgentHost {
             ClassLoader previous = Thread.currentThread().getContextClassLoader();
             try {
                 Thread.currentThread().setContextClassLoader(loader);
-                service = (FleetAgentBridge) loader.loadClass("com.mozhi.fleet.FleetDirector").newInstance();
+                service = (FleetAgentBridge) loader.loadClass("com.mozhi.fleet.game.FleetRuntime").newInstance();
                 service.initialize(new URL(base, "../data/config/agent.properties").toExternalForm());
             } finally { Thread.currentThread().setContextClassLoader(previous); }
             FleetAgentAccess.bind(service, "");

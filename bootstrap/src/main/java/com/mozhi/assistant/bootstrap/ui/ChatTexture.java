@@ -21,6 +21,11 @@ final class ChatTexture {
 
     void draw(float screenWidth, float screenHeight, float x, float y, int w, int h,
               float pixelScale, boolean dirty, Consumer<Graphics2D> paint) {
+        draw(screenWidth, screenHeight, x, y, w, h, pixelScale, dirty, true, paint);
+    }
+
+    void draw(float screenWidth, float screenHeight, float x, float y, int w, int h,
+              float pixelScale, boolean dirty, boolean dimBackground, Consumer<Graphics2D> paint) {
         GL11.glPushAttrib(GL11.GL_ALL_ATTRIB_BITS);
         GL11.glPushClientAttrib(GL11.GL_CLIENT_PIXEL_STORE_BIT);
         int matrixMode = GL11.glGetInteger(GL11.GL_MATRIX_MODE);
@@ -46,8 +51,10 @@ final class ChatTexture {
             GL11.glEnable(GL11.GL_BLEND);
             GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
             GL11.glDisable(GL11.GL_TEXTURE_2D);
-            GL11.glColor4f(0.015f, 0.025f, 0.05f, 0.80f);
-            quad(0, 0, screenWidth, screenHeight);
+            if (dimBackground) {
+                GL11.glColor4f(0.015f, 0.025f, 0.05f, 0.80f);
+                quad(0, 0, screenWidth, screenHeight);
+            }
 
             double scale = Math.min(Math.max(1, pixelScale),
                     (double) GL11.glGetInteger(GL11.GL_MAX_TEXTURE_SIZE) / Math.max(w, h));

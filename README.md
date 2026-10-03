@@ -1,7 +1,9 @@
 # 墨汁助手 · MozhiAssistant
 
 墨汁助手是《远行星号》（Starsector）的游戏内对话 Mod，使用 LangChain4j 调用模型服务。
-你可以在战役地图中与墨汁聊天，让她读取舰队、查询游戏资料、查看市场库存，并规划购买路线和设置导航。
+你可以在战役地图中与墨汁聊天，查询舰队与市场、规划购买路线，也可以派出独立舰队执行移动、买卖和回归任务。
+
+当前版本：**0.1.1**。发行 ZIP 包含四个运行 JAR、头像、控制台命令和不含密钥的默认配置。
 
 **玩家安装流程：下载 ZIP → 解压到 `mods` → 配置模型 → 启用 Mod。**
 LangChain4j 等运行依赖已包含在 `jars/mozhi-llm-client.jar` 中，玩家无需安装 Maven，也无需自行编译。
@@ -9,11 +11,14 @@ LangChain4j 等运行依赖已包含在 `jars/mozhi-llm-client.jar` 中，玩家
 
 ## 功能
 
-- **游戏内聊天**：独立对话窗口、流式回复、消息复制。
+- **游戏内聊天**：战役画面右上角通讯入口、独立对话窗口、流式回复、消息复制，支持 `Ctrl + Shift + M`。
 - **舰队查询**：实时读取玩家舰队，以及指定舰船的配装、舰长、战备等信息。
 - **资料查询**：查询舰型、武器、船插、战术系统和物品；支持名称、ID 和混合列表。
 - **星球与市场查询**：查看已知星球、环境资源、产业、市场货物及仓库中的商品和舰船。
 - **购买导航**：根据物品和数量查找购买地点，规划多站路线，并设置游戏导航。
+- **独立舰队**：从玩家舰队派出指定的非旗舰舰船并划拨资源；通过对话下达采购、出售、移动和回归任务。回归后合并舰船、军官、货物及资金。
+- **计划执行**：后台制定计划，按步骤执行；结合最近 20 步结果，在失败或每 15 秒时重新规划剩余工作。聊天窗口展示目标、执行情况和计划清单。
+- **异常通知**：完成任务显示绿色 **✓**，异常显示黄色 **!**。需要玩家介入时，墨汁会主动在聊天中说明情况，并询问下一步决定。
 - **会话记忆**：短期对话保存在内存；可按要求保存、修改或遗忘长期记忆，上下文接近预算时自动压缩。
 
 ## 使用前准备
@@ -26,14 +31,15 @@ LangChain4j 等运行依赖已包含在 `jars/mozhi-llm-client.jar` 中，玩家
 | 模型服务 | 支持 OpenAI 兼容 Chat Completions 接口，并支持 **工具调用（Tool Calling）** |
 | 网络 | 对话时需要能访问所配置的模型服务 |
 
-仓库同时提供源码和 `jars/` 下的四个运行 JAR。普通玩家无需安装 Maven 或自行下载 LangChain4j。
+仓库当前提供源码和 `jars/` 下的四个运行 JAR。普通玩家无需安装 Maven 或自行下载 LangChain4j。
 模型服务地址、模型名称和 API key 需要自行配置，游戏本体和 Console Commands 需自行安装。
 
 ## 快速开始（玩家）
 
 ### 1. 下载并解压
 
-在 GitHub 仓库页面选择 **Code → Download ZIP**，将压缩包中的项目文件夹解压到游戏的 `Starsector/mods/` 下。
+下载发行包 **`MozhiAssistant-0.1.1.zip`**，将其中的 `MozhiAssistant` 文件夹解压到游戏的 `Starsector/mods/` 下。
+若下载的是 GitHub **Code → Download ZIP** 源码包，需确认包含下列四个运行 JAR，并按下一节从模板创建配置。
 可以将文件夹改名为 `MozhiAssistant`。确保 `mod_info.json` 直接位于 Mod 文件夹内，不要多套一层目录：
 
 ```text
@@ -46,16 +52,18 @@ Starsector/
         ├── jars/
         │   ├── mozhi-bootstrap.jar
         │   ├── agent-runtime.jar
-        │   ├── mozhi-llm-client.jar
-        │   └── fleet-agent.jar
+        │   ├── fleet-agent.jar
+        │   └── mozhi-llm-client.jar
         ├── data/
-        │   └── config/agent.properties.example
+        │   └── config/
+        │       ├── agent.properties          # 发行包提供，首次使用需填写
+        │       └── agent.properties.example  # 公开模板
         └── graphics/
 ```
 
 - `mozhi-bootstrap.jar`：游戏插件入口、聊天 UI 和类加载桥接。
-- `fleet-agent.jar`：独立舰队 Plan-and-Execute 框架：放出、跟随与召回合并。
 - `agent-runtime.jar`：智能体逻辑、工具、上下文压缩和记忆，不内嵌 LLM 包。
+- `fleet-agent.jar`：独立舰队的规划、执行、结果检查、Agent 循环及游戏接入。
 - `mozhi-llm-client.jar`：独立 LLM 基础设施及 **LangChain4j、Jackson、SLF4J 等运行依赖**，供 agent 调用，也可供其他项目复用。
 
 不需要再放一份独立的 LangChain4j JAR，也不需要把游戏的 `starfarer.api.jar`、LWJGL 或 Log4j 复制进 Mod。
@@ -63,8 +71,9 @@ Console Commands 作为前置 Mod 单独安装并启用。
 
 ### 2. 配置模型
 
-将 `data/config/agent.properties.example` 复制一份，改名为同目录下的 `agent.properties`。
-用支持 **UTF-8** 的编辑器打开，至少修改：
+发行包已包含默认的 `data/config/agent.properties`，内容来自公开模板：`apiKey` 留空、`modelName` 为占位符，服务地址是公开 API 根地址。默认文件不包含可用凭据，需要自行填写后才能调用模型。
+
+用支持 **UTF-8** 的编辑器打开 `data/config/agent.properties`，至少修改以下三项。如果使用源码包且该文件不存在，将同目录下的 `agent.properties.example` 复制为 `agent.properties`：
 
 ```properties
 baseUrl=https://你的模型服务地址/v1/
@@ -74,32 +83,28 @@ apiKey=你的真实密钥
 
 也可以写成 `apiKey=${MOZHI_API_KEY}` 引用环境变量，详见下方“密钥配置”。
 `baseUrl` 填写兼容 API 根地址，不要填写完整的 `/chat/completions` 请求地址。
-以上地址和模型名都是占位内容，需要替换；其余配置可先保留模板值。
+填写自己的服务地址、模型名和密钥；上下文及输出预算需按所用模型支持的上限调整。
 更新 Mod 时保留自己的 `agent.properties`，不要用模板覆盖。
 
 ### 3. 启用并打开聊天
 
 1. 在游戏启动器的 Mod 列表中启用 **Console Commands** 和 **墨汁助手**。
 2. 启动游戏，载入存档，进入战役地图。
-3. 按 **Ctrl + Shift + M** 打开对话窗口。
+3. 点击战役画面右侧的 **与墨汁交流** 按钮，或按 **Ctrl + Shift + M** 打开对话窗口。
 4. 输入问题并发送，例如：“查看我当前的舰队，介绍一下各艘船的配装。”
 
 也可以在 Console Commands 控制台输入 `MozhiAgent chat`，然后关闭控制台打开聊天。
 
-### 原生舰队跟随测试
+对话窗口中的舰队面板显示目标、执行情况和计划清单。任务完成时，通讯按钮旁会出现绿色 **✓**，打开对话窗口后清除完成提示。步骤失败后重规划或任务被阻塞时显示黄色 **!**；异常未恢复时持续显示，打开对话窗口不会清除。恢复执行、取消任务或下达新任务后清除异常提示。
 
-在战役控制台输入 `MozhiFleetFollow`，对玩家当前所在地点、半径 3000 范围内的舰队直接下达 `FOLLOW`。可指定半径，例如 `MozhiFleetFollow 5000`。
-
-指令只执行一次 `fleet.clearAssignments()` 和 `fleet.addAssignment(FleetAssignment.FOLLOW, player, 100000f, text)`，不经过舰队 agent 或规划器，也不修改阵营关系、AI 模式或战斗行为。包括范围内的敌对舰队，但跳过玩家、空间站、已失效舰队及正在战斗/跃迁的舰队。
-
-控制台会列出舰队名称、ID、距离和下达后的当前任务。关闭控制台、解除暂停后观察；原生 AI、其他脚本或墨汁当前计划仍可能覆盖这次任务。
+任务停下、需要玩家介入时，墨汁会主动在聊天中生成一条说明，解释异常并询问下一步决定。同一次异常只发送一次；已有对话正在回复时排队等待，发送前已恢复的异常不再通知。自动重规划不会发送人工介入消息。通知生成复用当前对话记忆，玩家可以直接回复；生成通知时不执行游戏操作。模型不可用时，聊天中保留系统异常说明。
 
 ## 更新 Mod
 
-1. 退出游戏，下载新的仓库 ZIP。
-2. 将新版本文件覆盖到原来的 Mod 文件夹，保留目录结构，尤其是 `jars/`、`data/` 和 `graphics/`。
-3. 保留自己的 `data/config/agent.properties` 和 `data/memory/`，无需重新填写 key 或迁移记忆。
-4. 重新启动游戏。若新版本新增配置项，可参考新的 `agent.properties.example` 补充，不要直接覆盖真实配置。
+1. 退出游戏，下载新的发行 ZIP。
+2. 先备份原来的 `data/config/agent.properties` 和 `data/memory/`。
+3. 更新 Mod 文件时，**跳过发行包中的 `data/config/agent.properties`**，保留自己的配置和记忆。若解压工具已经覆盖配置，恢复备份。
+4. 新增配置项可对照 `agent.properties.example` 手动补充，然后重启游戏。
 
 源码目录和 Maven 文件可以随 Mod 一起保留，普通玩家无需操作它们。
 
@@ -127,13 +132,14 @@ Windows 用户可以在“编辑账户的环境变量”中添加用户变量；
 普通文本直接作为密钥；环境变量引用必须占据整个值，不支持拼接或嵌套。
 留空、引用格式错误、变量不存在或值为空都会报错，不会把引用文本作为 key 发送。
 
-本地 `data/config/agent.properties` 已被 Git 忽略；仓库使用不含真实密钥的 `agent.properties.example`。
+本地 `data/config/agent.properties` 已被 Git 忽略；仓库使用不含真实密钥的 `agent.properties.example`。发行脚本只把公开模板复制为包内默认配置，不读取本地实际配置或记忆目录。
 不要把真实密钥填进公共模板或强制提交本地配置。
 
 ## 聊天窗口操作
 
 | 操作 | 方式 |
 | --- | --- |
+| 打开窗口 | 点击右上角“与墨汁交流”或 `Ctrl + Shift + M` |
 | 打开或收起窗口 | `Ctrl + Shift + M` |
 | 发送消息 | `Enter` |
 | 输入换行 | `Shift + Enter` |
@@ -199,11 +205,37 @@ Windows 用户可以在“编辑账户的环境变量”中添加用户变量；
 需要精确指定变体时使用其 ID。需要区分跨类别同 ID 时，可使用 `COMMODITY:fuel` 这样的“类别代码:ID”。
 
 - 仅询问购买地点时不修改导航；明确要求带路后，库存足够时设置第一站。
-- 到达当前站附近并完成购买后，告诉墨汁“继续下一站”。工具不自动执行交易。
+- 玩家舰队的购买导航只设置路线，不自动交易；玩家到站购买后，告诉墨汁“继续下一站”。若希望自动采购，按下一节委派给独立舰队。
 - 路线优先选择附近能提供所需物品的市场，不保证全局最短或最低价格。
 - 距离为星际直线距离，未计入跳跃、星系内移动和绕行；尚未计算燃料、货舱及资金是否足够。
 - 名称有歧义或已确认库存不足时，不覆盖现有导航；会返回候选对象、缺货信息或供应线索。
 - 购买路线只保存在当前会话。库存、阵营关系或需求变化后，可以要求重新规划。
+
+### 派遣独立舰队
+
+先查询舰船并确认要派出的非旗舰舰船，再明确划拨信用点、补给、燃料和船员数量。墨汁先预览派遣内容，按你明确的选择放出舰队；派遣后原地待命。
+
+```text
+查看可派遣的非旗舰舰船，先不要放出舰队。
+预览派出“先锋”，划拨 50000 信用点、100 补给、200 燃料和 50 船员。先确认这些资源和船员是否够用。
+确认按刚才的舰船和数量派遣。
+让墨汁舰队前往贾加拉，购买 100 单位补给，然后返回我的舰队。
+查看墨汁舰队当前执行到哪一步。
+召回墨汁舰队。
+```
+
+上面的舰船名称与资源数量仅作示例，应根据当前存档中的实际舰船、资源和航程确定。
+
+| 动作 | 当前行为 |
+| --- | --- |
+| 移动 | 实际航行至指定目的地；交易前先到目标市场入轨 |
+| 购买 | 使用分舰队信用点，按交易时库存、价格和关税购买指定数量的货物或舰船 |
+| 出售 | 出售分舰队指定货物或舰船，收入归分舰队；不出售最后一艘船 |
+| 回归 | 实际返回玩家附近后，将舰船、军官、货物和资金合并回玩家舰队 |
+
+采购需明确目标、物品和数量。库存或资金不足时不会部分成交，失败结果交给规划器处理；无法继续时等待玩家指令。收到任务不代表已完成，以计划面板和实际执行结果为准。
+
+当前不支持跟随玩家、主动战斗、自动整备或自主发展。原生跟随测试命令 `MozhiFleetFollow` 已移除。不同 Mod 的专用商店脚本可能影响实际交易行为。
 
 ### 长期记忆
 
@@ -222,7 +254,7 @@ Windows 用户可以在“编辑账户的环境变量”中添加用户变量；
 
 ## 常用配置
 
-配置文件使用 UTF-8。修改文件后点击“新对话”或执行 `MozhiAgent reset`，下次请求时重新加载。
+配置文件使用 UTF-8。修改聊天配置后点击“新对话”或执行 `MozhiAgent reset`，下次聊天请求时重新加载。舰队规划器与聊天会话独立；修改其配置后需重新载入存档或重启游戏。
 更换 JAR 或修改操作系统环境变量后，需要重启游戏；环境变量还需由重新启动的启动器传入。
 
 | 配置项 | 用途 |
@@ -237,8 +269,10 @@ Windows 用户可以在“编辑账户的环境变量”中添加用户变量；
 | `temperature`、`topP` | 可选生成参数；留空使用服务端默认值 |
 | `maxTokens`、`maxCompletionTokens` | 单次输出上限，最多填写其中一个 |
 | `maxSequentialToolsInvocations` | 单轮对话允许的工具请求轮数，默认 4 |
-| `contextWindowTokens` | 本地上下文预算，模板为 131072，应按所用模型的实际窗口调整 |
+| `contextWindowTokens` | 本地上下文预算，模板为 262144，应按所用模型的实际窗口调整 |
 | `contextReserveTokens` | 为模型输出预留的预算；留空时按输出上限处理 |
+| `fleetPlannerMaxOutputTokens` | 舰队规划输出预算，模板为 32768，包含思考与计划正文 |
+| `fleetPlannerThinkingMode`、`fleetPlannerReasoningEffort` | 可选的舰队规划思考设置；省略时继承聊天配置 |
 | `memoryMaxMessages` | 消息数压缩阈值，默认 64，包含工具消息 |
 | `compressionTriggerRatio` | 接近输入预算时触发压缩的比例，默认 0.8 |
 | `compressionKeepRecentTurns` | 压缩时优先保留的最近轮数，默认 4 |
@@ -280,13 +314,13 @@ summaryReasoningEffort=
 
 ### 下载后缺少 jars 中的运行文件
 
-检查是否完整解压了仓库 ZIP，四个运行 JAR 应与 `mod_info.json`、`data/`、`graphics/` 一起保留。
+检查是否完整解压了发行 ZIP，四个运行 JAR 应与 `mod_info.json`、`data/`、`graphics/` 一起保留。
 如果下载的版本本身没有这四个文件，该版本就不能直接运行，需要包含运行 JAR 的版本；
 开发者可按“从源码编译”章节重新构建。
 
 ### 快捷键没有反应
 
-确认两个 Mod 均已启用，`jars/` 中包含 `mozhi-bootstrap.jar`、`agent-runtime.jar`、`mozhi-llm-client.jar` 和 `fleet-agent.jar`，且已经进入战役地图。
+确认两个 Mod 均已启用，`jars/` 中包含上述四个运行 JAR，且已经进入战役地图。
 尝试使用 `MozhiAgent chat`，关闭控制台后再操作。
 
 ### 密钥错误或环境变量读取失败
@@ -326,7 +360,7 @@ summaryReasoningEffort=
 
 ## 单独使用 LLM 基础设施
 
-`llm-client/` 是独立 Maven 模块，不依赖游戏、UI 或 agent。其他项目可只引入 `com.mozhi:mozhi-llm-client:0.1.0`；手动引入时使用 `llm-client/target/mozhi-llm-client-0.1.0-all.jar`，其中已包含模型调用所需的第三方依赖。
+`llm-client/` 是独立 Maven 模块，不依赖游戏、UI 或 agent。其他项目可只引入 `com.mozhi:mozhi-llm-client:0.1.1`；手动引入时使用 `llm-client/target/mozhi-llm-client-0.1.1-all.jar`，其中已包含模型调用所需的第三方依赖。
 
 完整接入方法、流式回调、历史/工具请求及远行星号隔离加载示例见 [LLM Client 文档](llm-client/README.md)。该构件尚未发布到公共 Maven 仓库，需要先在本地构建安装。
 
@@ -351,10 +385,10 @@ mvn -Dmaven.test.skip=true clean package
 mvn "-Dstarsector.core=D:/Games/Starsector/starsector-core" "-Dconsole.jar=D:/Games/Starsector/mods/Console Commands/jars/lw_Console.jar" -Dmaven.test.skip=true clean package
 ```
 
-将路径替换为自己的实际路径。根项目执行 `package` 后自动更新 `jars/mozhi-bootstrap.jar`、`jars/agent-runtime.jar`、`jars/mozhi-llm-client.jar` 和 `jars/fleet-agent.jar`。
+将路径替换为自己的实际路径。根项目执行 `package` 后自动更新 `jars/` 中的构建产物。`fleet-agent` 包含模型层、Planner、Executor、Monitor、Agent 循环及游戏桥接。
 只有 LLM 包通过 Maven Shade 合并第三方运行依赖并保留服务发现资源。agent 是普通业务 JAR，必须与 LLM 包一起加载；游戏库、桥接模块和 Lombok 不打入 LLM 包。
 
-**提交代码更新时，同步提交重新构建的这四个 JAR**，使仓库 ZIP 中的运行文件与源码一致。
+**提交代码更新时，同步提交重新构建的运行 JAR**，使仓库 ZIP 中的运行文件与源码一致。
 本地模型配置、记忆、游戏依赖、Maven 缓存和 `target/` 构建目录仍不提交。
 更新 JAR 前请完全退出游戏，Windows 无法覆盖游戏映射使用的 JAR。游戏运行中只编译、不复制到安装目录时，可以使用：
 
@@ -362,33 +396,23 @@ mvn "-Dstarsector.core=D:/Games/Starsector/starsector-core" "-Dconsole.jar=D:/Ga
 mvn -Dmozhi.skipDeployment=true -Dmaven.test.skip=true package
 ```
 
-此时新产物仅在各模块的 `target/` 目录；退出游戏后，在根目录重新执行不带跳过参数的 `mvn package`，将四个运行 JAR 一起更新。
+此时新产物仅在各模块的 `target/` 目录；退出游戏后，在根目录重新执行不带跳过参数的 `mvn package`，更新运行 JAR。
+
+### 构建发行包
+
+在仓库根目录执行 `./scripts/package-release.ps1`；依赖已缓存时可加 `-Offline`。脚本从干净构建的产物生成 `dist/MozhiAssistant-<版本>.zip` 和 SHA-256 校验文件，包内包含公开模板及由它生成的默认 `agent.properties`，不会复制本地凭据、记忆或开发目录。
 
 ## 墨汁独立舰队
 
-舰队 agent 使用 **Plan-and-Execute** 框架，支持放出舰队、跟随玩家、前往指定星球/星系/市场、按命令买卖商品或舰船，以及召回合并。
+独立舰队模块已接入游戏，包含不可变模型、异步 Planner、Executor、结果检查器 Monitor、Agent 循环，以及最近 20 步执行结果的滑动窗口。购买、贩卖、移动和回归玩家舰队四种动作独立放在 `actions/` 中。派遣、世界状态采集、聊天命令、状态面板和 JSON 存档恢复已通过离线验证；实际模型及游戏航行行为仍需游戏内测试。
 
-它作为聊天智能体的子智能体运行：主智能体通过 `delegateToFleetAgent` 委派完整原始任务，舰队子智能体在新计划开始前、步骤完成后和长步骤执行期间检查目标。偏离目的、原生任务被改向或长期无进展会触发 Replan；原始目标、已完成交易和跟随进度保留，只重新规划剩余工作。界面显示目标检查原因和重规划次数，聊天智能体通过状态工具读取结果。
+与墨汁对话指定非旗舰舰船和各项划拨资源，派遣后原地待命。建议先测试移动至市场，再少量买卖、保存读档，最后召回核对资产。旧版跟随任务已移除；载入旧版舰队存档后需要重新下达任务。
 
-`agent.properties` 可配置 `fleetReviewIntervalDays=1`、`fleetReviewMinIntervalSeconds=30`、`fleetStallDays=3`、`fleetMaxReplans=3`。自动检查会产生额外模型请求；同一任务达到重规划上限或无法继续时显示原因并等待新指令。
-
-放出前，在聊天中指定舰船名称/实例 ID，并明确划拨信用点、补给、燃料和船员。舰船与军官从玩家舰队实际转移，放出后默认持续跟随玩家；玩家必须保留旗舰及至少一艘船。
-
-可以说“墨汁跟着我”“跟随我 3 天，然后回来合并”或“现在召回墨汁”。跟随后召回是一份两步计划：`FOLLOW_PLAYER → RETURN`。召回在同一个执行器中执行，实际抵达玩家附近后才合并剩余舰船、军官、货物和资金。
-
-也可以说“去 Jangala 买 100 个补给，再去 Asharu 卖 50 个补给，然后回来合并”。计划顺序为 `MOVE_TO → BUY → MOVE_TO → SELL → RETURN`：移动步骤必须实际进入目标环绕轨道才完成，买卖步骤只在对应市场交易，不包含航行。按当时真实库存和价格转移实物、结算分舰队信用点。目的地及商品支持名称/ID；不加入资金储备、CR 或补给策略判断。库存不足或余额不够时明确失败，不假装成交。交易细节与限制见舰队 Agent 文档。
-
-`FleetPlanner` 通过 `LlmClient.aiService(...)` 调用 LangChain4j AI Services，直接取得 `FleetPlanDraft` / `FleetPlanStepDraft` 对象，校验后转换为保存执行进度的 `FleetPlan` / `FleetPlanStep`，再由 `FleetPlanExecutor` 逐步执行。模型不能填写执行进度与结果。参数化命令直接建立计划，目标检查与自动重规划仍使用模型；沿用 `agent.properties` 的连接配置。
-
-类型化规划默认使用 `structuredOutputMode=prompt`，由框架自动生成格式要求并转换对象。模型服务支持原生 JSON Schema 时可设为 `json_schema`，使用服务端格式约束；普通聊天仍保留自然语言输出。
-
-聊天窗口保留舰队状态与计划面板，显示实时资源、当前步骤和跟随进度；窄窗口点击“舰队计划”查看。计划随战役存档保存，新对话不影响分舰队。
-
-详细说明见 [舰队 Agent 文档](fleet-agent/README.md)。
+新架构采用异步 Planner、不调用 LLM 的 Executor，以及只检查执行结果的 Monitor。Agent 循环负责步骤推进、计划切换和异步调度，失败或默认每 15 秒触发重新规划，目标偏差由 Planner 判断。详见 [舰队 Agent 文档](fleet-agent/README.md)。
 
 ## 数据与源码
 
-对话内容、执行工具取得的结果和加载的长期画像会发送到你配置的模型服务。
+对话内容、执行工具取得的结果和加载的长期画像会发送到你配置的模型服务。独立舰队规划会发送任务、世界状态和最近 20 步结果；主动异常通知会发送受阻任务快照及当前对话上下文。
 短期会话不写入存档；长期画像以 JSON 保存，默认 `data/memory/` 已被 Git 忽略。
 如果将画像改到其他目录，请同步检查忽略规则。
 
@@ -399,7 +423,7 @@ mvn -Dmozhi.skipDeployment=true -Dmaven.test.skip=true package
 | `bootstrap/` | 游戏插件入口、聊天 UI、主线程调度、类加载器及桥接接口 |
 | `llm-client/` | 可单独引入的 LLM 基础设施：模型连接配置、同步/流式调用、重试及通用隔离加载入口 |
 | `agent-runtime/` | ReAct 循环、工具执行、上下文压缩和记忆，通过 LlmClient 调用模型 |
-| `fleet-agent/` | 独立舰队规划与执行，通过 LlmClient 调用模型；主线程控制真实舰队 |
+| `fleet-agent/` | 独立舰队：Planner、Executor、Monitor、Agent 循环、四种动作、20 步历史与游戏桥接 |
 | `agent-runtime/.../runtime/tools/` | 舰队、规格、记忆、星球和购买导航工具 |
 | `data/config/agent.properties.example` | 可提交的配置模板 |
 | `data/console/commands.csv` | Console Commands 命令注册 |

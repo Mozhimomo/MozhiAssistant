@@ -2,157 +2,91 @@ package com.mozhi.assistant.bootstrap.ui;
 
 import com.mozhi.assistant.bridge.FleetAgentAccess;
 import java.awt.*;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 
-/** 只读舰队面板：主线程轮询桥接数据，独立滚动，不触发模型或游戏操作。 */
+/** 目标、执行摘要和步骤清单；资源及完整诊断可通过交流查询。 */
 final class FleetStatusPanel {
-    private static final Color ERROR = new Color(235,139,133);
-    private Map<String,Object> data = Map.of();
+    static final Color WARNING = new Color(232, 186, 109);
+    private FleetPresentation model = FleetPresentation.from(Map.of());
     private Rectangle bounds = new Rectangle();
     private long nextPoll;
     private int scroll, contentHeight;
-    private String planId = "";
-    private int stepIndex = -1;
-
     boolean update() {
         long now = System.nanoTime();
         if (now < nextPoll) return false;
         nextPoll = now + 500_000_000L;
-        Map<String,Object> next = FleetAgentAccess.view();
-        if (next.equals(data)) return false;
-        Map<?,?> plan = map(map(next.get("state")).get("plan"));
-        String id = text(plan.get("id"));
-        int step = number(plan.get("currentStep")).intValue();
-        if (!id.equals(planId) || step != stepIndex) scroll = 0;
-        planId = id; stepIndex = step; data = next;
-        return true;
+        return setModel(FleetPresentation.from(FleetAgentAccess.view()));
     }
-    boolean contains(int x,int y) {return bounds.contains(x,y);}
-    void scroll(int delta) {scroll=Math.max(0,Math.min(maxScroll(),scroll+delta*54));}
-    private int maxScroll() {return Math.max(0,contentHeight-Math.max(1,bounds.height-65));}
-
+    boolean setModel(FleetPresentation next) {
+        if (next.equals(model)) return false;
+        if (!next.taskId().equals(model.taskId()) || !next.planId().equals(model.planId())) scroll = 0;
+        model = next; return true;
+    }
+    boolean contains(int x, int y) { return bounds.contains(x, y); }
+    void scroll(int delta) { scroll = Math.max(0, Math.min(maxScroll(), scroll + delta * 54)); }
+    private int maxScroll() { return Math.max(0, contentHeight - Math.max(1, bounds.height - 70)); }
     void paint(Graphics2D g, Rectangle area) {
         bounds = area;
-        ChatFrame.panel(g,area.x,area.y,area.width,area.height,8,ChatFrame.SURFACE,ChatFrame.BORDER);
-        ChatText.label(g,"远征舰队",ChatText.BODY,ChatText.ACCENT,area.x+16,area.y+28);
-        ChatText.label(g,"状态 / 执行计划",ChatText.SMALL,ChatText.MUTED,area.x+16,area.y+48);
-        g.setColor(ChatFrame.BORDER);g.drawLine(area.x+14,area.y+57,area.x+area.width-14,area.y+57);
-        List<Row> rows = rows();
-        List<List<ChatText.Line>> lines = new ArrayList<>();
-        contentHeight = 8;
-        for(Row row:rows) {
-            List<ChatText.Line> wrapped=ChatText.wrap(row.text(),row.heading()?ChatText.BODY:ChatText.SMALL,area.width-42);
-            lines.add(wrapped);contentHeight+=wrapped.size()*22+(row.heading()?14:7);
-        }
-        scroll=Math.min(scroll,maxScroll());
-        Shape old=g.getClip();g.clipRect(area.x+10,area.y+63,area.width-20,Math.max(1,area.height-73));
-        int y=area.y+66-scroll;
-        for(int i=0;i<rows.size();i++) {
-            Row row=rows.get(i);
-            ChatText.drawLines(g,lines.get(i),area.x+16,y,22,row.color());
-            y+=lines.get(i).size()*22+(row.heading()?14:7);
-        }
-        g.setClip(old);
-        if(maxScroll()>0) {
-            int track=area.height-79;
-            int thumb=Math.max(22,track*track/contentHeight);
-            int top=area.y+65+(int)((float)scroll/maxScroll()*(track-thumb));
-            g.setColor(ChatText.ACCENT);g.fillRect(area.x+area.width-8,top,2,thumb);
-        }
-    }
-    private record Row(String text,Color color,boolean heading) {}
-    private List<Row> rows() {
-        List<Row> rows=new ArrayList<>();
-        if(data.containsKey("error")) {
-            rows.add(new Row(text(data.get("error")),ERROR,false));return rows;
-        }
-        Map<?,?> state=map(data.get("state"));
-        Map<?,?> mission=map(state.get("mission"));
-        if(!mission.isEmpty()) {
-            rows.add(new Row("舰队子任务",ChatText.ACCENT,true));
-            rows.add(new Row(text(mission.get("originalGoal")),ChatText.TEXT,false));
-            rows.add(new Row(label(text(mission.get("status")))+" · 重规划 "+number(mission.get("replanCount")).intValue()+" 次",ChatText.MUTED,false));
-            if(!text(mission.get("reviewReason")).isBlank())
-                rows.add(new Row(text(mission.get("reviewReason")),ChatText.MUTED,false));
-        }
-        String fleet=text(state.get("fleetId"));
-        if(fleet.isBlank()) {
-            rows.add(new Row(switch(text(state.get("mode"))) {
-                case "MERGED" -> "已返航合并";
-                case "LOST" -> "舰队已覆灭或移除";
-                default -> "尚未派出舰队";
-            },ChatText.TEXT,true));
-            rows.add(new Row("通过与墨汁对话分配舰船和物资。",ChatText.MUTED,false));
-        } else {
-            rows.add(new Row(text(data.get("location"))+" · "+label(text(state.get("mode"))),ChatText.TEXT,true));
-            Map<?,?> logistics=map(data.get("logistics"));
-            int ships=list(data.get("ships")).size();
-            rows.add(new Row(String.format(java.util.Locale.ROOT,"%d 艘舰船   ·   信用点 %,.0f",ships,number(logistics.get("credits")).doubleValue()),ChatText.TEXT,false));
-            rows.add(new Row(String.format(java.util.Locale.ROOT,"补给 %.0f（约 %.1f 日）\n燃料 %.0f / %.0f\n船员 %.0f / 最低 %.0f   ·   CR %.0f%%",
-                    n(logistics,"supplies"),n(logistics,"supplyDays"),n(logistics,"fuel"),n(logistics,"fuelCapacity"),
-                    n(logistics,"crew"),n(logistics,"requiredCrew"),n(logistics,"readiness")*100),ChatText.TEXT,false));
-            rows.add(new Row("当前指令",ChatText.ACCENT,true));
-            rows.add(new Row(text(state.get("order")),ChatText.TEXT,false));
-            if(!text(state.get("reason")).isBlank())rows.add(new Row(text(state.get("reason")),ChatText.MUTED,false));
-        }
-        Map<?,?> plan=map(state.get("plan"));
-        rows.add(new Row("执行计划",ChatText.ACCENT,true));
-        if(plan.isEmpty()) rows.add(new Row(text(state.get("plannerStatus")).isBlank()?"等待制定计划":text(state.get("plannerStatus")),ChatText.MUTED,false));
-        else {
-            List<?> steps=list(plan.get("steps"));
-            long completed=steps.stream().filter(s->"COMPLETED".equals(text(map(s).get("status")))).count();
-            String status=text(plan.get("status"));
-            rows.add(new Row(label(status)+"   "+completed+" / "+steps.size()+" 步",color(status),false));
-            rows.add(new Row(text(plan.get("goal")),ChatText.TEXT,false));
-            if(!text(plan.get("feedback")).isBlank() && ("FAILED".equals(status)||"PAUSED".equals(status)||"CANCELLED".equals(status)))
-                rows.add(new Row(text(plan.get("feedback")),color(status),false));
-            for(int i=0;i<steps.size();i++) {
-                Map<?,?> step=map(steps.get(i));
-                String stepStatus=text(step.get("status"));
-                rows.add(new Row((i+1)+". "+label(stepStatus)+" · "+text(step.get("description")),color(stepStatus),false));
-                if("FOLLOW_PLAYER".equals(text(step.get("action"))))
-                    rows.add(new Row(n(step,"durationDays")==0?"持续跟随":String.format(java.util.Locale.ROOT,"时长：%.2f / %.2f 游戏日",n(step,"progressDays"),n(step,"durationDays")),ChatText.MUTED,false));
-                if(!text(step.get("destination")).isBlank())
-                    rows.add(new Row("目的地："+text(step.get("destination")),ChatText.MUTED,false));
-                if("BUY".equals(text(step.get("action"))) || "SELL".equals(text(step.get("action"))))
-                    rows.add(new Row(label(text(step.get("action")))+"："+text(step.get("item"))+" × "+number(step.get("quantity")).intValue()
-                            +(text(step.get("submarket")).isBlank()?"":" · "+text(step.get("submarket"))),ChatText.MUTED,false));
-                if(!text(step.get("result")).isBlank())rows.add(new Row(text(step.get("result")),ChatText.MUTED,false));
+        ChatFrame.panel(g, area.x, area.y, area.width, area.height, 8, ChatFrame.SURFACE, ChatFrame.BORDER);
+        int x = area.x + 18, width = area.width - 36;
+        ChatText.label(g, "舰队计划", ChatText.BODY, ChatText.TEXT, x, area.y + 32);
+        g.setColor(ChatFrame.BORDER); g.drawLine(x, area.y + 51, x + width, area.y + 51);
+        Graphics2D body = (Graphics2D) g.create();
+        try {
+            body.clipRect(x, area.y + 62, width, Math.max(1, area.height - 74));
+            int top = area.y + 62 - scroll, y = top;
+            ChatText.label(body, "目标", ChatText.SMALL, ChatText.MUTED, x, y + 15); y += 27;
+            y += wrapped(body, model.goal(), ChatText.BODY, ChatText.TEXT, x, y, width, 3, 25) + 24;
+            ChatText.label(body, "执行情况", ChatText.SMALL, ChatText.MUTED, x, y + 15); y += 29;
+            Color statusColor = model.attention() ? WARNING : ChatText.ACCENT;
+            ChatText.label(body, model.label(), ChatText.BODY, statusColor, x, y + 18);
+            String count = model.steps().isEmpty() ? "" : model.completed() + " / " + model.steps().size();
+            float countWidth = (float) ChatText.SMALL.getStringBounds(count, ChatText.METRICS).getWidth();
+            ChatText.label(body, count, ChatText.SMALL, ChatText.MUTED, x + width - countWidth, y + 17); y += 32;
+            if (!model.steps().isEmpty()) {
+                body.setColor(new Color(34, 53, 58)); body.fillRoundRect(x, y, width, 3, 3, 3);
+                body.setColor(statusColor); body.fillRoundRect(x, y, Math.round(width * (float) model.completed() / model.steps().size()), 3, 3, 3); y += 14;
             }
-            String planner=text(state.get("plannerStatus"));
-            if(!planner.isBlank()) rows.add(new Row(planner,ChatText.MUTED,false));
+            y += wrapped(body, model.detail(), ChatText.SMALL, ChatText.MUTED, x, y, width, 3, 21) + 27;
+            ChatText.label(body, "计划清单", ChatText.SMALL, ChatText.MUTED, x, y + 15); y += 30;
+            if (model.steps().isEmpty()) y += wrapped(body, model.status().equals("PLANNING") ? "计划制定后会显示在这里" : "暂无待执行步骤", ChatText.SMALL, ChatText.MUTED, x, y, width, 2, 22);
+            for (int i = 0; i < model.steps().size(); i++) {
+                var step = model.steps().get(i);
+                boolean done = step.status().equals("COMPLETED") || step.status().equals("SUCCEEDED");
+                boolean running = step.status().equals("RUNNING") || step.status().equals("WAITING");
+                boolean failed = step.status().equals("FAILED");
+                Color color = failed ? WARNING : done || running ? ChatText.ACCENT : ChatText.MUTED;
+                int titleHeight = Math.min(2, ChatText.wrap(step.title(), ChatText.BODY, width - 46).size()) * 24;
+                int rowHeight = titleHeight + 37;
+                if (running || failed) { body.setColor(running ? new Color(24, 46, 49) : new Color(48, 42, 32)); body.fillRoundRect(x, y, width, rowHeight, 8, 8); }
+                body.setColor(color); body.drawOval(x + 9, y + 12, 19, 19);
+                if (done) checkMark(body, x + 13, y + 18, color);
+                else ChatText.label(body, Integer.toString(i + 1), ChatText.SMALL, color, x + (i < 9 ? 15 : 11), y + 27);
+                wrapped(body, step.title(), ChatText.BODY, done ? ChatText.MUTED : ChatText.TEXT, x + 39, y + 8, width - 46, 2, 24);
+                ChatText.label(body, FleetPresentation.label(step.status()), ChatText.SMALL, color, x + 39, y + titleHeight + 28);
+                y += rowHeight + 9;
+            }
+            contentHeight = y - top + 12;
+        } finally { body.dispose(); }
+        scroll = Math.min(scroll, maxScroll());
+        if (maxScroll() > 0) {
+            int track = Math.max(1, area.height - 82), thumb = Math.max(22, track * track / contentHeight);
+            int top = area.y + 65 + (int) ((float) scroll / maxScroll() * (track - thumb));
+            g.setColor(ChatFrame.BORDER); g.fillRoundRect(area.x + area.width - 7, top, 2, thumb, 2, 2);
         }
-        List<?> log=list(state.get("log"));
-        if(!log.isEmpty()) {
-            rows.add(new Row("最近动态",ChatText.ACCENT,true));
-            for(int i=Math.max(0,log.size()-4);i<log.size();i++)rows.add(new Row(text(log.get(i)),ChatText.MUTED,false));
+    }
+    static int wrapped(Graphics2D g, String text, Font font, Color color, int x, int y, int width, int limit, int spacing) {
+        var lines = ChatText.wrap(text, font, width);
+        if (lines.size() > limit) {
+            int end = lines.get(limit - 1).end();
+            String cut = text.substring(0, Math.max(0, end - 1)) + "…";
+            while (ChatText.wrap(cut, font, width).size() > limit && cut.length() > 1) cut = cut.substring(0, cut.length() - 2) + "…";
+            lines = ChatText.wrap(cut, font, width);
         }
-        return rows;
+        ChatText.drawLines(g, lines, x, y, spacing, color); return lines.size() * spacing;
     }
-    private static Color color(String status) {
-        return switch(status) {
-            case "RUNNING","COMPLETED" -> ChatText.ACCENT;
-            case "FAILED","BLOCKED" -> ERROR;
-            case "PAUSED" -> ChatFrame.GOLD;
-            default -> ChatText.MUTED;
-        };
+    static void checkMark(Graphics2D g, int x, int y, Color color) {
+        Stroke old = g.getStroke(); g.setStroke(new BasicStroke(2, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.setColor(color); g.drawLine(x, y + 3, x + 4, y + 7); g.drawLine(x + 4, y + 7, x + 11, y - 1); g.setStroke(old);
     }
-    private static String label(String value) {
-        return switch(value) {
-            case "FOLLOW_PLAYER" -> "跟随玩家"; case "RETURN" -> "返航合并";
-            case "MOVE_TO" -> "前往目的地"; case "BUY" -> "购买"; case "SELL" -> "出售"; case "ORBIT" -> "环绕待命";
-            case "REVIEWING" -> "检查原始目标"; case "REPLANNING" -> "重新规划"; case "BLOCKED" -> "需要处理"; case "EXECUTING" -> "执行中";
-            case "IDLE" -> "等待指令"; case "PLANNING" -> "规划中";
-            case "READY" -> "准备执行"; case "RUNNING" -> "执行中"; case "PENDING" -> "待执行";
-            case "COMPLETED" -> "已完成"; case "FAILED" -> "失败"; case "PAUSED" -> "暂停执行";
-            case "CANCELLED" -> "已取消"; default -> value;
-        };
-    }
-    private static Map<?,?> map(Object value) {return value instanceof Map<?,?> m?m:Map.of();}
-    private static List<?> list(Object value) {return value instanceof List<?> l?l:List.of();}
-    private static String text(Object value) {return value==null?"":String.valueOf(value);}
-    private static Number number(Object value) {return value instanceof Number n?n:0;}
-    private static double n(Map<?,?> values,String key) {return number(values.get(key)).doubleValue();}
 }

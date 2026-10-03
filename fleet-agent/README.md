@@ -1,129 +1,172 @@
-# 墨汁舰队 Agent
+# 舰队智能体
 
-独立 `fleet-agent.jar`，作为聊天智能体的舰队子智能体，使用 **Plan-and-Execute + Review/Replan** 框架。聊天智能体委派原始任务，子智能体负责规划、执行、目标检查和偏离后的重新规划。模型配置沿用 `data/config/agent.properties`。
+目前已实现模型层、异步 Planner、Executor、结果检查器 Monitor、Agent 循环和四种游戏动作，包括最近 20 步执行结果的滑动窗口。`game.FleetRuntime` 已接入游戏主循环、聊天命令、状态面板和 JSON 存档。离线验证通过，原生航行和实际模型响应仍需游戏内验证。
 
-## 源码导航
+## 模型层
 
-从 [`FleetDirector`](src/main/java/com/mozhi/fleet/FleetDirector.java) 的 `command()` 和 `advance()` 开始阅读：前者接收命令，后者在游戏更新时消费模型结果并推进步骤。完整调用链、数据对象区别、线程规则和例子见 [源码工作原理](docs/architecture.md)。
+两个模型都是 Java 17 record，只描述计划内容，不保存执行状态，也不依赖游戏 API 或 LLM。
 
-```text
-com.mozhi.fleet/
-├── FleetDirector.java     # 入口：协调任务、模型请求、执行和存档
-├── model/                 # 原始任务、行动计划、步骤、整体状态
-├── planning/              # LLM 规划、目标检查、结构化输出 DTO
-├── execution/             # 步骤执行、原生任务与进度监控
-├── game/                  # 游戏接口：导航、目的地解析、舰队分出与合并
-├── trade/                 # 实时库存、报价、实物交易与回滚
-└── config/                # 检查频率、停滞时限、重规划次数
+| 模型 | 字段 | 含义 |
+| --- | --- | --- |
+| `Plan` | `id` | 计划 ID；创建新计划时分配新 ID |
+| `Plan` | `goal` | 这份计划要达成的目标 |
+| `Plan` | `steps` | 按执行顺序排列的非空步骤列表，步骤 ID 不可重复 |
+| `Step` | `id` | 步骤 ID；同一动作跨计划继续执行时保留 |
+| `Step` | `action` | 动作名称，由后续执行器匹配已注册的动作 |
+| `Step` | `parameters` | 动作参数，只允许 JSON 值；无参数时传空 Map |
+| `Step` | `description` | 用于界面展示的步骤说明 |
+| `Step` | `expectedOutcome` | 给监控器参考的预期效果描述，不是实际执行结果 |
+
+`Plan.create(...)`、`Step.create(...)` 为新对象生成 UUID；构造器可使用已有 ID 恢复数据。改变动作或参数时应创建新步骤。步骤 ID 仅提供身份，后续协调器仍需核对实际执行记录和动作内容，不能仅凭 ID 决定是否跳过或续接。
+
+列表和嵌套参数在创建时拷贝并设为只读，避免规划线程与游戏主线程共享可变数据。构造器拒绝空白必填字段、重复步骤 ID、非有限数值，以及游戏对象等非 JSON 参数。
+
+```java
+Step move = Step.create("MOVE_TO", Map.of("destinationId", "jangala"),
+        "前往 Jangala", "抵达目标市场");
+Step buy = Step.create("BUY", Map.of("item", "supplies", "quantity", 100),
+        "购买补给", "补给增加 100");
+Plan plan = Plan.create("采购补给", List.of(move, buy));
 ```
 
-根包只保留游戏加载的入口。各目录对应真实 Java 子包；数据对象通过普通 JSON 保存，不依赖原来的类全名。测试仍放在 `src/test/java/com/mozhi/fleet/`，作为跨层集成检查。
+这里展示模型的构造方式，实际动作需要提供下文动作表中的完整参数。模型只校验通用结构，具体动作的参数、前置条件和完成判定由动作实现校验。当前步骤下标和进度版本由 Agent 保存；全部步骤成功后直接视为任务完成。
 
-## 使用
+## Planner
 
-- 放出：指定玩家舰船名称/实例 ID，先预览，再明确划拨信用点、补给、燃料和船员。转移原舰船及其军官；不能派出玩家旗舰，玩家至少留一艘船。放出后默认持续跟随玩家。
-- 跟随：“墨汁跟着我”“跟随我 3 个游戏日”。
-- 组合计划：“跟随我 3 天，然后回来合并”。对应 `FOLLOW_PLAYER(durationDays=3) → RETURN`。
-- 立即召回：“现在回来合并”。以单步 `RETURN` 计划替换当前计划。
-- 状态：“查看墨汁舰队的状态和当前计划”。
-- 导航：“去 Corvus 星系”“去 Jangala”。支持星球、星系和市场的名称/ID；重名时明确指定 ID。
-- 买卖：“去 Jangala 买 100 个补给，再去 Asharu 卖 50 个补给，然后回来合并”。也可指定武器、战机 LPC、船插物品、特殊物品或舰船。
+`planning.Planner` 接收 `PlanningRequest`，通过 `plan(request)` 立即返回 `Future<PlanningResult>`。配置读取、LLM 客户端初始化及规划请求在专用后台线程执行，不访问游戏对象。可以传配置 URL，也可以注入已有的 `LlmClient`。
 
-召回使用同一个计划执行器，实际靠近玩家且双方不在战斗/跃迁中才合并。剩余舰船、军官、货物和信用点全部转回玩家。不会瞬移或复制资产。
+配置 URL 入口支持 `fleetPlannerMaxOutputTokens`、`fleetPlannerThinkingMode` 和 `fleetPlannerReasoningEffort`，分别覆盖舰队规划的输出预算与思考参数，省略时继承聊天配置。模板将规划输出预算设为 32768，包含思考和计划正文；思考参数默认继承聊天配置。
 
-## Plan-and-Execute
+请求包含任务 ID、快照版本、原始目标、世界状态文本、执行历史快照、触发原因、当前计划和 `ActionSpec` 动作列表。动作契约说明前提与效果，并列出允许的参数、JSON 类型及必填项。规划器校验动作名、参数名和类型；具体数值范围及游戏前提由后续执行器校验。
 
-- `FleetPlanner` / `FleetPlanningService`：通过 `LlmClient.aiService(...)` 调用 LangChain4j AI Services，直接取得类型化的 `FleetPlanDraft`，不手写 JSON 示例或手动解析响应。
-- `FleetPlanDraft` / `FleetPlanStepDraft`：只描述目标、拒绝原因及行动定义；通过业务校验后转换为可执行计划。
-- `FleetPlan` / `FleetPlanStep`：保存当前步骤、跟随时长、实际进度、状态与结果。
-- `FleetPlanExecutor`：逐步执行 `FOLLOW_PLAYER` / `MOVE_TO` / `BUY` / `SELL` / `RETURN`；召回完成后计划结束。
-- `FleetDestinations`：解析全星区市场、星球和星系名称/ID，包含只绑定实体的模组市场。
-- `FleetTrading` / `FleetTradeInventory`：执行时读取真实库存，自行转移实物和结算信用点。
-- `FleetDirector`：管理命令、后台规划、主线程执行、过期回复取消及存档。
-- `FleetMission`：保存任务 ID、原始目的、授权行动、执行账本和重规划次数。
-- `FleetGoalReviewService`：使用类型化输出检查计划与实际结果是否符合原始目的。
-- `FleetExecutionMonitor`：检查原生任务目标被覆盖或航行长期不推进。
-
-`FleetPlanStep` 是独立的步骤类，保存执行状态；模型输出的 `FleetPlanStepDraft` 包含行动参数和重规划时的 `objectiveId`，没有实体解析结果、已完成进度或交易结果。格式转换由框架完成，步骤顺序、时间范围等业务约束仍由本地代码校验。
-
-`agent.properties` 可配置 `structuredOutputMode=prompt`（默认，由框架自动生成格式提示）或 `json_schema`（服务端支持时使用原生 JSON Schema）。两种模式都返回 Java 对象；不支持 Schema 的服务请保留默认值。
-
-跟随由 `game/FleetWorld.follow()` 对玩家下达原生 `GO_TO_LOCATION`，执行器持续维护目标。正数时长仅累计实际跟上玩家的游戏时间；追赶、战斗、跃迁和游戏暂停不累计。时长 0 表示无限期跟随，必须是最后一步。召回会合并整个分舰队，也必须是最后一步。有限时长跟随完成且没有后续步骤时，舰队等待新指令。
-
-聊天智能体优先调用 `delegateToFleetAgent`，将玩家完整目的委派给舰队子智能体，并通过 `getMozhiFleetStatus` 查询任务结果。`commandMozhiFleet` 保留为兼容入口。参数化的跟随、导航和买卖工具可以直接建立计划，但同样接受目标检查。
-
-## 执行检查与重新规划
-
-流程为 `委派原始任务 → Plan → Review → Execute → Review`，发现偏离后进入 `Replan → Review → Execute`。所有模型请求在后台线程进行，实时游戏数据在主线程采集，模型不会直接操作游戏对象。
-
-- 新计划开始前、每一步完成后（包括最后一步）调用模型核对原始任务目的；长步骤执行期间定期检查。
-- 原生任务目标被覆盖、航行长期不接近目的地或步骤执行失败，自动触发重规划。正常接近目标、等待入轨和战斗/跃迁不直接视为偏离。
-- 检查期间不推进计划步骤或进行交易；原生航行可以继续。重规划时保持当前轨道或就地待命。
-- `mission.originalGoal` 在整个子任务期间保持不变。重规划输入含原始目的、当前状态、偏离原因、已完成动作和跟随进度。
-- 首份通过目标检查的计划形成授权目标。重规划必须引用对应 `objectiveId`，不能擅自更改交易市场/品种，也不能增加数量或重复已成交的动作；有限跟随需扣除实际已累计的时间。允许补充原交易目标的 `MOVE_TO` 前置步骤。
-- 新的玩家命令建立新的任务 ID，并取消旧请求。旧模型回复不能覆盖新任务；已发生的实物转移不会因取消而撤销。
-- 检查认为缺少必要指令、模型调用失败、达到重规划次数上限，或交易回滚结果不确定时，子任务进入 `BLOCKED`，显示具体原因，等待玩家通过聊天提供新指令。不会自动改变原始目标。
-
-默认检查配置（可写入 `agent.properties`）：
-
-```properties
-fleetReviewIntervalDays=1
-fleetReviewMinIntervalSeconds=30
-fleetStallDays=3
-fleetMaxReplans=3
-```
-
-定期检查同时满足游戏日和实际秒数间隔；新计划、步骤完成等事件检查不受该限频约束。配置分别控制定期间隔、实际时间限频、无进展时限和同一任务最多重规划次数。自动检查和重规划会产生额外模型请求，不增加补给、CR 或资金储备策略。
-
-规划和目标检查沿用 `agent.properties` 的模型、输出上限、思考参数及结构化输出模式。空正文最多额外请求一次；明确达到输出上限时直接报错，显示结束原因和 token 用量，不把思考内容当作检查结论。检查仍失败会暂停子任务，可调整配置、重启游戏后重新下达命令。
-
-## 导航与市场交易
-
-`MOVE_TO` 负责航行到目标并进入环绕轨道：先靠近，再下达 `ORBIT_PASSIVE`，后续读取原生 `OrbitAPI` 确认环绕目标后才完成。只下达任务或刚进入星系都不算完成；星系目的地使用星系中心作为环绕目标。
-
-`BUY` / `SELL` 只负责交易，既不航行也不设置环绕。必须先完成对应市场的 `MOVE_TO`；同一市场可接着执行多笔买卖，换市场则再次 `MOVE_TO`。直接调用买卖工具时也必须已经环绕目标市场，否则报错。只指定星系不能交易，必须指定具体市场或星球。
-
-例如去 A 购买、去 B 出售后召回：`MOVE_TO(A) → BUY(A) → MOVE_TO(B) → SELL(B) → RETURN`。
-
-商品支持名称/ID；舰船也支持舰船实例 ID、船名、船体名称/ID。名字有歧义时返回候选 ID；特殊物品可用 `物品ID:实例数据` 区分不同蓝图等对象。每一步处理一种物品的明确整数数量，多种物品用多个步骤。
-
-未指定交易区时，按公开市场、军用市场、黑市、其他非隐藏交易区的顺序购买，可合并多个交易区的现货；出售进入第一个匹配交易区。指定交易区名称/ID 后仅在该区成交。免费仓储不作为商店。
-
-- 执行时调用交易区常规库存更新，再读取当前 `CargoAPI` 和 `getMothballedShips()`；不保留库存快照，不生成替代商品或舰船。
-- 商品按市场 `getSupplyPrice` / `getDemandPrice` 报价；舰船按 `getBaseBuyValue` / `getBaseSellValue`（含舰载装备）；武器、LPC、特殊物品使用游戏买卖倍率。各类价格再计入交易区关税。
-- 信用点只从墨汁分舰队扣除或加入；无需预留资金。购买移出商店现货，出售移出分舰队现货。船只转移原始对象，保留配装和实例数据；出售时军官留在分舰队。
-- 不检查 CR、补给储备、舱容或剩余资金策略，不自动采购补给。库存不足或付不起整笔价格时不部分成交；转移异常时尝试回滚本次货物和资金。为避免空舰队被引擎移除而丢失资产，不出售最后一艘舰船。
-- 这是独立 NPC 交易，不调用依赖玩家 UI、声望或许可证的购买权限，也不伪造玩家交易事件。模组自定义交易区的专用脚本效果未模拟。
-
-完成的交易步骤立即推进并保存指挥状态，读档接着下一步执行；全部完成后继续环绕最后目的地，等待新命令。战斗或跃迁期间只等待引擎允许操作，不因玩家在别处战斗而停止独立舰队买卖。
-
-## UI 与存档
-
-聊天窗口保留舰队状态及执行计划面板。可查看原始任务、目标检查原因、重规划次数，以及位置、舰船数、资金、物资、当前步骤和最近动态。窄窗口通过“舰队计划”切换查看；打开聊天仍会暂停战役。
-
-计划以 JSON 随战役存档保存，读档后继续。新对话不影响分舰队。旧版发展存档升级时保留原舰队和资产，取消旧发展任务并改为跟随；已在返航的继续召回。
-
-原始任务、授权目标和执行账本也随存档保存。读档时重新发起尚未结束的规划/检查请求，完成的交易不会重做；旧版计划会补建子任务记录。
-
-不包含自主贸易、战斗决策、避战规划、自动补给和装配。买卖只执行明确命令；物资消耗、航行和被动卷入的战斗仍由游戏原生机制处理。
-
-## 聊天工具
-
-| 工具 | 行为 |
+| 结果 | 含义 |
 | --- | --- |
-| `previewMozhiFleet` | 预览指定舰船及划拨需求 |
-| `dispatchMozhiFleet` | 实际分出指定舰船与资源，默认跟随 |
-| `getMozhiFleetStatus` | 读取真实舰队与计划状态 |
-| `followMozhiFleet` | 设置跟随时长，可在之后召回 |
-| `recallMozhiFleet` | 设置立即返回合并的计划 |
-| `moveMozhiFleet` | 前往指定星球、星系或市场 |
-| `buyForMozhiFleet` | 仅在已环绕的市场购买指定商品或舰船，不移动 |
-| `sellForMozhiFleet` | 仅在已环绕的市场出售指定商品或舰船，不移动 |
-| `delegateToFleetAgent` | 主聊天智能体向舰队子智能体委派原始任务 |
-| `commandMozhiFleet` | 将自然语言交给 Plan 阶段，组合导航、交易、跟随及召回步骤 |
+| `REPLACE` | 返回新计划，计划目标沿用原始目标，计划 ID 由应用分配 |
+| `KEEP` | 返回原计划对象，保留步骤身份，不重置执行进度 |
+| `GOAL_REACHED` | 模型认为目标已达成，Agent 核对任务和进度版本后结束任务 |
+| `BLOCKED` | 当前无法制定可执行计划，提供阻碍原因 |
 
-## 构建与检查
+模型只能指定 `reuseStepId` 来建议续接当前计划中未完成的步骤。代码会核对动作和参数一致，并复用原步骤对象；新步骤由代码生成 ID。不存在、已完成、重复复用或修改参数的复用请求会被拒绝。Agent 丢弃执行进度变化前生成的计划，并阻止续接刚失败的步骤。相同语义但不同 ID 的动作仍依赖 Planner 结合历史判断，Agent 不额外做语义审核。
 
-根目录 `mvn package` 仍部署四个 JAR。游戏只注册 bootstrap，舰队 agent 与 LLM 依赖由私有类加载器加载。
+响应通过 `LlmClient.aiService(...)` 转成草案，沿用现有连接、输出预算、思考和结构化输出配置。为兼容严格 JSON Schema，草案的动态参数使用 `parametersJson` 文本传输，解析及校验后才进入 `Step.parameters`。重复 JSON 键、非对象参数、尾随内容和无效计划都会使 Future 异常完成，不回退为成功或保留计划。
 
-构建后运行 `./fleet-agent/verify.ps1`，用本地假模型及可变库存检查类型化输出、导航与环绕顺序、实物结算、回滚和存档，并验证偏离触发重规划、取消旧请求、次数上限、目标约束、重复交易拦截与跟随时间保留；不启动游戏或请求模型服务。
+同一快照的重复请求共用进行中的 Future。忙碌时提交不同快照会立即报错，调用方应合并周期触发，等待当前结果后使用新快照再次规划，避免请求堆积或每 15 秒取消尚未完成的请求。新用户任务可以显式 `cancel()` 后提交；`close()` 取消请求并关闭后台线程。底层请求如果忽略中断，后续请求仍需等待它完成或超时，但取消的 Future 不会返回迟到结果。`isStopped()` 可供后续类加载器清理逻辑使用。
+
+结果带回原任务 ID 和快照版本。调用方应在游戏主线程轮询 `isDone()`，完成后再读取结果、核对任务与实际进度并决定是否接纳。Planner 不自动替换执行中的计划，也不启动周期计时器。
+
+## 最近 20 步执行历史
+
+`model.ExecutionResult` 包含步骤定义、`RUNNING / WAITING / SUCCEEDED / FAILED` 状态和实际结果说明。Executor 每轮反馈自动写入共享的 `ExecutionHistory`；外部接入时不要重复记录。
+
+- 窗口从旧到新保留最近 20 个步骤的最新结果，包含成功、失败及仍在执行的步骤。
+- 同一步骤的多轮反馈更新原记录，不会让航行等长动作挤满窗口。
+- 超出窗口时移除最旧的详细结果；已成功步骤的 ID 单独保留，直到该任务结束。
+- 每次规划使用不可变的 `snapshot()`，包含动作、参数、状态及实际效果或失败原因；提交后的执行更新不改变已有请求。
+- Agent 启动新任务时清空共享历史和终态缓存。存档通过 `Agent.State` 和 `Executor.State` 保存历史窗口、完成身份、终态缓存和当前步骤。
+
+历史记录与规划请求示例（使用 Executor 时，它会代为调用 `history.record`）：
+
+```java
+ExecutionHistory history = new ExecutionHistory(); // 一个任务持有一份
+history.record(new ExecutionResult(step, ExecutionResult.Status.SUCCEEDED, "已实际买入 100 个补给"));
+PlanningRequest request = new PlanningRequest(taskId, revision, goal, worldState,
+        history.snapshot(), "步骤完成后重新规划", actions, currentPlan);
+Future<PlanningResult> pending = planner.plan(request);
+// 后续游戏更新中判断 pending.isDone()，再读取和核对结果。
+```
+
+## Executor 与动作
+
+`execution.Executor` 在创建它的游戏主线程运行，不调用 LLM。`execute(plan, stepIndex)` 只推进 Agent 指定的一步，返回 `ExecutionResult`；成功后不会自动进入下一步。`execute(step)` 也可用于执行单个步骤。
+
+所有动作放在 `actions/`：
+
+| 动作 | 实现 | 参数和完成条件 |
+| --- | --- | --- |
+| `BUY` | `BuyAction` | `marketId`、`submarketId`、`itemType`、`itemId`、`quantity`；先实际入轨，再转移库存和扣款 |
+| `SELL` | `SellAction` | 参数同 BUY；实际移出自有库存，转入交易区并收款 |
+| `MOVE_TO` | `MoveToAction` | `destinationId` 为实体、市场或星系 ID；航行并确认实际环绕目标后成功 |
+| `RETURN` | `ReturnToPlayerAction` | 无参数；驶向玩家，靠近后合并全部舰船、军官、货物和信用点，最后移除分舰队；必须位于计划末尾 |
+
+`itemType` 支持 `COMMODITY`、`WEAPON`、`FIGHTER`、`HULLMOD`、`SPECIAL`、`SHIP`。普通物品使用规格 ID；舰船使用实例 ID，数量必须为 1。特殊物品可通过 `itemData` 指定实例数据，同一物品 ID 对应多种数据时必须明确选择。数量必须为 1 至 1000000 的整数，不能出售分舰队最后一艘舰船。
+
+买卖在执行当次更新并读取指定交易区的实际库存与价格，计入关税；数量或资金不足时整步失败，不部分成交，不代替 MOVE_TO 导航。交易通过 NPC 的资产转移完成，不模拟玩家交易 UI 或模组商店的专用交互脚本。免费仓储与隐藏交易区不可用于买卖。
+
+游戏暂停、受控舰队战斗或跃迁期间返回 WAITING。RETURN 也等待玩家结束战斗和跃迁；已有原生航行由游戏继续更新。MOVE_TO 下达环绕任务时仍返回 RUNNING，实际 OrbitAPI 确认入轨才返回 SUCCEEDED。`stop()` 可停止未完成的移动并保留已有轨道；之后可以续接同一步骤。
+
+执行器缓存成功和失败的终态，同一步骤的重复调用返回原结果，防止重复买卖与合并。失败步骤不会因下一轮调用而自动重试；需要 Agent 决定是否创建新步骤。相同 ID 不能改变步骤定义。终态缓存、历史和当前步骤都随游戏保存，恢复时沿用实际进度。
+
+购买、出售及派遣的资产转移中出现异常时，按逆序恢复并核对变更。恢复无法确认时，`isBlocked()` 为 true，Agent 停止任务；新任务和读档均不能清除这个阻塞。RETURN 到达后直接合并舰船、军官、货物和信用点，移除分舰队即完成，不进行结果数量校验或事务回滚。
+
+原生货舱的商品小数累计量不包含在 `CargoAPI.getQuantity()` 中。资产转移与回滚使用货堆加 `CargoData.getPartial()` 的实际总量；回归也合并只有小数余额而没有可见货堆的商品。该适配针对本项目的 0.98a 游戏库，并有真实 `CargoData` 回归测试。
+
+通过 Executor 调用动作，以确保主线程检查、状态检查、终态缓存和执行历史都生效：
+
+```java
+ExecutionHistory history = new ExecutionHistory();
+Executor executor = new Executor(ActionContext.forFleet(controlledFleet), history);
+// executor.actionSpecs() 提供给 PlanningRequest，确保规划和执行使用同一份动作契约。
+ExecutionResult result = executor.execute(plan, currentStepIndex);
+// 由 Agent 根据 result 和实际世界状态决定推进、等待、结束或重规划。
+```
+
+`ActionContext` 持有实时游戏对象，仅供主线程使用；Planner 仍然只接收不可变的文本及数据快照。
+
+## Monitor
+
+`execution.Monitor` 是无状态的结果检查器，只接收 `ExecutionResult` 并返回结论：
+
+| 执行结果 | 检查结论 |
+| --- | --- |
+| `RUNNING / WAITING` | `CONTINUE`：当前步骤继续 |
+| `SUCCEEDED` | `ADVANCE`：当前步骤完成，可以推进 |
+| `FAILED` | `REPLAN`：需要重新规划 |
+
+Monitor 不持有 Planner、Executor、计划进度或计时器，也不调用模型。Agent 根据检查结论执行推进、结束或规划操作。
+
+## Agent 循环
+
+`com.mozhi.fleet.Agent` 在游戏主线程协调 Planner、Executor 与 Monitor，持有任务和计划进度：
+
+- `RUNNING / WAITING`：继续当前步骤；每轮最多执行一步。
+- `SUCCEEDED`：推进下标，全部步骤成功后结束任务。
+- `FAILED`：暂停执行并携带失败历史重新规划；资产状态不确定时直接阻塞。
+- 默认每 15 秒重新规划，可通过构造器调整。目标偏差由 Planner 根据最新世界状态和历史判断。
+- 规划期间继续执行有效的旧计划；忙碌期间的触发合并为一次。步骤成功或失败后，旧版本规划结果会被丢弃并重新请求。
+- `KEEP` 保留进度；替换计划时可续接相同的当前步骤；`GOAL_REACHED` 直接完成，`BLOCKED` 停止任务。
+- 周期规划失败时继续有效的旧计划，下一周期再请求；没有可执行计划时进入阻塞状态。
+
+```java
+Agent agent = new Agent(planner, executor, () -> collectWorldState());
+agent.start(goal);
+// 游戏主循环传入未加速的真实秒数增量；暂停期间不累计时间、不执行或接纳计划。
+agent.advance(realElapsedSeconds, sector.isPaused());
+Agent.View state = agent.view();
+```
+
+`collectWorldState()` 由接入层实现，在主线程采集文本快照。`view()` 提供任务、计划、步骤下标、最近结果、规划状态及原因；状态包括 `IDLE / PLANNING / EXECUTING / COMPLETED / BLOCKED / CANCELLED`。外部事件可调用 `requestReplan(reason)`，下一轮更新时提交；`cancel()` 停止当前任务，`close()` 同时关闭 Planner。`start()` 替换旧任务并清空执行历史，迟到的旧任务响应不会被接纳。
+
+## 验证
+
+先在仓库根目录执行 `mvn -Dmozhi.skipDeployment=true -Dmaven.test.skip=true package`，然后运行 `./fleet-agent/verify.ps1`。脚本使用 Java 17 和本地 `starsector-core` API 编译当前源码，验证模型、Planner、20 步历史窗口、Executor 的动作与资产操作，以及 Agent 经 Monitor 检查后的步骤推进、周期调度、暂停、失败重规划、过期结果丢弃和任务切换。还覆盖派遣回滚、桥接命令、购买后保存恢复、回归合并、规划中读档和阻塞状态恢复。
+
+退出游戏并构建部署后，可运行 `./fleet-agent/verify.ps1 -CheckPackaged`，通过游戏使用的私有类加载器加载 `jars/` 中的入口并执行召回。存在本地配置时仅校验配置解析，不输出密钥、不发网络请求。以上检查使用本地假模型及可变游戏 API 代理，不启动游戏。
+
+## 游戏接入与测试
+
+`FleetAgentHost` 加载 `game.FleetRuntime`，由主线程每帧调用 Agent。真实时间通过单调时钟计算，不受游戏加速倍率影响；暂停期间不累计规划时间。`GameWorld` 采集舰队资产、实际目的地 ID、市场和相关库存，供 Planner 规划。其他市场只提供目录信息，库存未知时不编造。
+
+派遣后舰队原地待命。目前只支持购买、出售、移动和回归，旧版跟随任务不再提供。明确地点的移动和召回可直接创建 Plan，自然语言复合任务由 Planner 生成。
+
+游戏存档只写 JSON 字符串（键 `mozhi_assistant_fleet_agent_v2`），不保存私有类加载器对象或 Future。读档后恢复执行下标，未结束的规划重新取快照提交。旧版存档只接管原舰队资产，需重新下达任务，旧计划不自动执行。
+
+建议依次测试：指定非旗舰及资金物资派遣 → 前往市场入轨 → 少量购买/出售 → 保存读档确认进度 → 召回确认资产合并。解除暂停才会执行；状态面板可查看每步结果。复杂模组市场和真实模型响应仍以游戏内结果为准。
+
+## 架构进度
+
+- **Planner（已实现）**：根据原始目标、世界状态和最近 20 步执行结果，异步生成候选计划。
+- **Executor（已实现）**：不调用 LLM，执行指定步骤；四种动作独立放在 actions 目录中，结果写入历史窗口。
+- **Monitor（已实现）**：只检查执行结果，返回继续、推进或重规划结论。
+- **Agent 循环（已实现）**：管理任务与计划进度，按 Monitor 结论推进；按可配置间隔（默认 15 秒）触发规划、合并忙碌期间的触发、接纳有效候选计划。
+
+- **游戏桥接（已实现）**：派遣、世界状态、主循环、聊天工具、状态面板、JSON 存档与类加载生命周期。

@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-$artifact=Join-Path $PSScriptRoot 'target/mozhi-llm-client-0.1.0-all.jar'
+$artifact=Join-Path $PSScriptRoot 'target/mozhi-llm-client-0.1.1-all.jar'
 if(!(Test-Path -LiteralPath $artifact)){throw 'Build llm-client with mvn package first'}
 $output=Join-Path $PSScriptRoot 'target/regression-classes'
 [IO.Directory]::CreateDirectory($output) | Out-Null

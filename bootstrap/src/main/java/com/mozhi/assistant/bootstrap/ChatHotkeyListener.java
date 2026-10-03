@@ -7,6 +7,7 @@ import com.fs.starfarer.api.campaign.listeners.CampaignUIRenderingListener;
 import com.fs.starfarer.api.combat.ViewportAPI;
 import com.fs.starfarer.api.input.InputEventAPI;
 import com.mozhi.assistant.bootstrap.ui.ChatWindow;
+import com.mozhi.assistant.bootstrap.ui.CampaignChatButton;
 import java.util.List;
 import org.lazywizard.console.Console;
 import org.lwjgl.input.Keyboard;
@@ -18,6 +19,7 @@ public final class ChatHotkeyListener implements CampaignInputListener, Campaign
     private static boolean wasPaused;
     private static boolean repeatWasEnabled;
     private static ChatWindow window;
+    private static CampaignChatButton launcher;
 
     @Override public int getListenerInputPriority() { return 10000; }
 
@@ -36,8 +38,9 @@ public final class ChatHotkeyListener implements CampaignInputListener, Campaign
             if (open) suppressInteractions();
             return;
         }
-        if (!canOpen()) return;
+        if (!canOpen()) { if (launcher != null) launcher.hidden(); return; }
         for (InputEventAPI event : events) {
+            if (!event.isConsumed() && launcher != null && launcher.input(event)) continue;
             if (!event.isConsumed() && event.isKeyDownEvent() && !event.isRepeat()
                     && event.isCtrlDown() && event.isShiftDown() && !event.isAltDown()
                     && event.getEventValue() == Keyboard.KEY_M) {
@@ -53,11 +56,14 @@ public final class ChatHotkeyListener implements CampaignInputListener, Campaign
         pending = false;
         // Loading a save must not restore the pause state from the previous campaign.
         open = false;
+        if (launcher != null) launcher.reset();
         if (window != null) Keyboard.enableRepeatEvents(repeatWasEnabled);
         // GPU deletion is deferred to the next render callback, where a GL context exists.
     }
 
     static void openPending() {
+        if (launcher == null) launcher = new CampaignChatButton(ChatHotkeyListener::requestOpen);
+        launcher.update(open);
         if (open) {
             CampaignUIAPI ui = Global.getSector().getCampaignUI();
             if (ui.isShowingDialog() || ui.isShowingMenu() || ui.getCurrentCoreTab() != null) {
@@ -78,6 +84,7 @@ public final class ChatHotkeyListener implements CampaignInputListener, Campaign
             repeatWasEnabled = Keyboard.areRepeatEventsEnabled();
             Keyboard.enableRepeatEvents(true);
             open = true;
+            launcher.acknowledge();
             suppressInteractions();
         } catch (RuntimeException | LinkageError exception) {
             fail(exception);
@@ -107,12 +114,15 @@ public final class ChatHotkeyListener implements CampaignInputListener, Campaign
 
     @Override
     public void renderInUICoordsAboveUIAndTooltips(ViewportAPI viewport) {
-        if (window == null) return;
         try {
-            if (open) window.render();
-            else {
+            if (open && window != null) window.render();
+            else if (window != null) {
                 try { window.dispose(); }
                 finally { window = null; }
+            }
+            if (!open && launcher != null) {
+                if (canOpen()) launcher.render();
+                else launcher.hidden();
             }
         } catch (RuntimeException | LinkageError exception) {
             fail(exception);

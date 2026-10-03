@@ -1,4 +1,4 @@
-# 使用 UTF-8 保存。复制为 agent.properties 后填写服务地址、模型和密钥。
+# 使用 UTF-8 保存。发行包的 agent.properties 由此模板生成；填写服务地址、模型和密钥后使用。
 # apiKey 直接填写真实密钥；或写成 ${MOZHI_API_KEY} 读取指定环境变量。
 baseUrl=https://api.openai.com/v1/
 modelName=YOUR_TOOL_CAPABLE_MODEL
@@ -20,9 +20,9 @@ maxSequentialToolsInvocations=4
 systemPrompt=你是游戏《远行星号》中的墨汁智能体。简短地用中文回答。涉及玩家舰队时必须调用 getFleetSummary 实时读取最新详情，不要凭记忆猜测。涉及整数加法时必须调用 add 工具。调用完工具后向用户解释结果。
 
 # ReAct 上下文窗口：按序列化 UTF-8 字节保守估算 token，包含工具定义和用户画像。
-contextWindowTokens=131072
+contextWindowTokens=262144
 # 留空则按 maxTokens/maxCompletionTokens 预留；两者也为空时为 4096。
-contextReserveTokens=
+contextReserveTokens=32768
 compressionTriggerRatio=0.8
 compressionKeepRecentTurns=4
 # 提示词中的摘要目标长度（UTF-8 字节），仅作引导；模型返回正文完整保留，不截取。
@@ -40,13 +40,11 @@ streamingEnabled=true
 # 普通聊天和工具调用不因此强制改为 JSON 输出。
 structuredOutputMode=prompt
 
-# 舰队子智能体：步骤前后检查目标；长步骤按游戏日及实际秒数限频检查。
-fleetReviewIntervalDays=1
-fleetReviewMinIntervalSeconds=30
-# 航行/跟随连续多久没有进展时触发重规划（游戏日）。
-fleetStallDays=3
-# 同一原始任务最多自动重规划次数，达到上限后显示原因并等待新指令。
-fleetMaxReplans=3
+# 舰队 Agent 默认每 15 秒（不含暂停时间）异步重新规划，失败时也会触发。
+# Monitor 只检查执行结果；旧版 fleetReview* / fleetStallDays / fleetMaxReplans 已不使用。
+# 舰队规划器可独立覆盖聊天的输出与思考配置；省略键时继承聊天配置。
+# 输出预算包含思考和计划正文；思考参数默认继承聊天配置。
+fleetPlannerMaxOutputTokens=32768
 
 # 思考模式（对话与摘要互相独立；留空则不发送参数，不互相继承）。
 # thinkingMode / summaryThinkingMode: enabled 或 disabled；用于 DeepSeek thinking.type 协议。

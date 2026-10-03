@@ -23,7 +23,7 @@ mvn -Dmaven.test.skip=true install
 <dependency>
     <groupId>com.mozhi</groupId>
     <artifactId>mozhi-llm-client</artifactId>
-    <version>0.1.0</version>
+    <version>0.1.1</version>
 </dependency>
 ```
 
@@ -31,8 +31,8 @@ mvn -Dmaven.test.skip=true install
 
 构建得到：
 
-- `target/mozhi-llm-client-0.1.0.jar`：普通 Maven 构件，依赖由 Maven 管理。
-- `target/mozhi-llm-client-0.1.0-all.jar`：包含 LangChain4j 的 OpenAI 客户端、核心请求/响应类型、HTTP 客户端、Jackson 等运行依赖。手动引入时选这个文件。
+- `target/mozhi-llm-client-0.1.1.jar`：普通 Maven 构件，依赖由 Maven 管理。
+- `target/mozhi-llm-client-0.1.1-all.jar`：包含 LangChain4j 的 OpenAI 客户端、核心请求/响应类型、HTTP 客户端、Jackson 等运行依赖。手动引入时选这个文件。
 
 两者选一种。单 JAR 未重定位第三方包，其他版本的 LangChain4j/Jackson 应使用独立类加载器隔离。单 JAR 同时包含 LangChain4j 的工具和 AiServices 模块；LlmClient 接口本身只负责模型调用，不自动执行工具。
 
@@ -156,7 +156,7 @@ runtime.close();
 在本模块目录执行（Windows）：
 
 ```powershell
-javac -encoding UTF-8 --release 17 -cp target/mozhi-llm-client-0.1.0-all.jar -d target/example-classes examples/example/ChatBridge.java examples/example/runtime/ChatEntry.java examples/example/IsolatedChatExample.java
+javac -encoding UTF-8 --release 17 -cp target/mozhi-llm-client-0.1.1-all.jar -d target/example-classes examples/example/ChatBridge.java examples/example/runtime/ChatEntry.java examples/example/IsolatedChatExample.java
 ```
 
 仅编译示例不发送模型请求。填写自己的配置后可自行运行 `example.IsolatedChatExample`。
