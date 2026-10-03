@@ -64,6 +64,12 @@ public final class FleetUiChecks {
         var blocked = FleetPresentation.from(Map.of("state", Map.of("mode", "BLOCKED", "reason", "finishReason=LENGTH, outputTokens=8192")));
         require(!blocked.detail().contains("Tokens"), "technical diagnostics hidden");
         require(FleetPresentation.from(Map.of("state", Map.of("mode", "MERGED"))).success(), "merge is success");
+        var reviewing = FleetPresentation.from(Map.of("state", Map.of("mode", "MERGED", "mission", Map.of("id", "review", "status", "REVIEWING"))));
+        notice.update(reviewing, false);
+        require(reviewing.label().equals("验收中") && !reviewing.success() && notice.badge() == FleetNotice.Badge.NONE, "Merge is not goal completion while review is pending");
+        var uncertain = FleetPresentation.from(Map.of("state", Map.of("mode", "MERGED", "mission", Map.of("id", "review", "status", "BLOCKED", "reviewReason", "请玩家检查目标"))));
+        notice.update(uncertain, false);
+        require(uncertain.attention() && !uncertain.success() && notice.badge() == FleetNotice.Badge.ATTENTION, "Uncertain review after merge shows intervention badge");
         notice.reset();
         require(notice.badge() == FleetNotice.Badge.NONE, "save reset clears old state");
     }

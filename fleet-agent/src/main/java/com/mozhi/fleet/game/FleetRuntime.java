@@ -71,14 +71,43 @@ public final class FleetRuntime implements FleetAgentBridge {
             attach(fleet);
             if (restored != null) agent.restore(restored);
             else GameWorld.hold(fleet);
+        } else if (mode.equals("MERGED") && detachedState != null && detachedState.completionReview()) {
+            Agent.State restored = detachedState;
+            attach(sector.getPlayerFleet()); // 只恢复验收；执行器禁止对玩家舰队执行动作。
+            agent.restore(restored);
         }
     }
 
     private void attach(CampaignFleetAPI fleet) {
+        if (agent != null) agent.cancel();
         if (planner == null) planner = plannerFactory == null ? new Planner(configUrl) : plannerFactory.get();
         agent = new Agent(planner, new Executor(new ActionContext(sector, fleet, Global.getSettings(), Global.getFactory()),
-                new ExecutionHistory()), () -> encode(GameWorld.observations(sector, controlled(), agent.view().goal(), agent.view().plan())));
+                new ExecutionHistory()), this::observations);
         detachedState = null;
+    }
+
+    private String observations() {
+        if (agent.merged()) return encode(Map.of("controlledFleetState", "MERGED", "playerFleet", GameWorld.fleet(sector.getPlayerFleet()),
+                "mergeResult", agent.view().lastResult().result(), "tradeReceipts", tradeReceipts()));
+        var observation = new LinkedHashMap<String, Object>(GameWorld.observations(sector, controlled(), agent.view().goal(), agent.view().plan(), agent.resourceCheck()));
+        observation.put("tradeReceipts", tradeReceipts());
+        observation.put("returnAfterCompletion", agent.returnAfterCompletion());
+        observation.put("returning", agent.returning());
+        return encode(observation);
+    }
+
+    /** 仅返回基础类型，跨私有类加载器；保留本任务中已离开计划或历史窗口的成交记录。 */
+    private List<Map<String, Object>> tradeReceipts() {
+        var trades = agent != null ? agent.tradeResults() : detachedState == null ? List.<com.mozhi.fleet.model.ExecutionResult>of()
+                : detachedState.execution().terminal().stream().filter(entry -> entry.tradeReceipt() != null).toList();
+        return trades.stream().map(entry -> {
+            var receipt = entry.tradeReceipt();
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("stepId", entry.step().id()); row.put("action", entry.step().action());
+            row.put("parameters", entry.step().parameters()); row.put("creditsSpent", receipt.creditsSpent());
+            row.put("creditsReceived", receipt.creditsReceived()); row.put("quotedTotal", receipt.quotedTotal());
+            return row;
+        }).toList();
     }
 
     @Override public String command(String requestJson) {
@@ -103,14 +132,18 @@ public final class FleetRuntime implements FleetAgentBridge {
             } else {
                 controlled();
                 switch (operation) {
-                    case "recall" -> agent.start(Plan.create("回归玩家舰队", List.of(Step.create("RETURN", Map.of(), "返回玩家并合并", "分舰队资产并入玩家"))));
+                    case "recall" -> agent.recall();
                     case "move" -> {
                         String destination = text(request, "destination");
                         var target = GameWorld.destination(sector, destination);
                         agent.start(Plan.create("移动至 " + destination, List.of(Step.create("MOVE_TO", Map.of("destinationId", target.getId()),
                                 "前往 " + target.getName(), "实际环绕目标"))));
                     }
-                    case "order" -> agent.start(text(request, "instruction"));
+                    case "order" -> {
+                        if (request.has("returnAfterCompletion") && !request.get("returnAfterCompletion").isBoolean())
+                            throw new IllegalArgumentException("返航授权必须为布尔值");
+                        agent.start(text(request, "instruction"), request.path("returnAfterCompletion").asBoolean(false));
+                    }
                     case "buy", "sell" -> {
                         String destination = text(request, "destination"), item = text(request, "item");
                         int quantity = integer(request, "quantity");
@@ -121,7 +154,7 @@ public final class FleetRuntime implements FleetAgentBridge {
                                 + "。不自动航行，未入轨则返回 BLOCKED。");
                     }
                     case "cancel" -> agent.cancel();
-                    default -> throw new IllegalArgumentException("不支持的命令：" + operation + "；当前动作仅购买、出售、移动、回归");
+                    default -> throw new IllegalArgumentException("不支持的命令：" + operation + "；购买、出售、移动、回归及跑商任务可通过 order 委派");
                 }
                 problem = "";
             }
@@ -152,7 +185,11 @@ public final class FleetRuntime implements FleetAgentBridge {
         requireOwner();
         long now = System.nanoTime();
         double seconds = Math.max(0, (now - lastNanos) / 1_000_000_000d); lastNanos = now;
-        if (closed || agent == null || fleetId.isBlank()) return;
+        if (closed || agent == null) return;
+        if (fleetId.isBlank()) {
+            if (mode.equals("MERGED")) agent.advance(seconds, sector.isPaused());
+            return;
+        }
         try {
             var fleet = GameWorld.find(sector, fleetId);
             if (fleet == null || fleet.isExpired() || fleet.isEmpty()) {
@@ -176,13 +213,18 @@ public final class FleetRuntime implements FleetAgentBridge {
         var fleet = GameWorld.find(sector, fleetId);
         if (fleet != null) result.putAll(GameWorld.fleet(fleet));
         var state = new LinkedHashMap<String, Object>();
+        var receipts = tradeReceipts();
+        state.put("tradeReceipts", receipts);
         state.put("fleetId", fleetId); state.put("mode", mode); state.put("reason", problem);
         var current = agent != null ? agent.view() : detachedState == null ? null : detachedState.view();
         if (current != null) {
             if (!fleetId.isBlank()) state.put("mode", current.status().name());
             state.put("order", current.goal()); state.put("reason", problem.isBlank() ? current.reason() : problem);
             state.put("mission", Map.of("id", current.taskId(), "originalGoal", current.goal(), "status", current.status().name(), "reviewReason", current.reason()));
-            state.put("plannerStatus", current.planning() ? "后台规划中" : "");
+            state.put("returnAfterCompletion", agent != null ? agent.returnAfterCompletion() : detachedState.returnAfterCompletion());
+            state.put("returning", agent != null ? agent.returning() : detachedState.returning());
+            state.put("awaitingReturnConfirmation", current.status() == Agent.Status.COMPLETED && !mode.equals("MERGED") && !fleetId.isBlank());
+            state.put("plannerStatus", current.planning() ? current.status() == Agent.Status.REVIEWING ? "目标验收中" : "后台规划中" : "");
             if (current.plan() != null) {
                 List<Map<String, Object>> steps = new ArrayList<>();
                 for (int i = 0; i < current.plan().steps().size(); i++) {
@@ -195,6 +237,8 @@ public final class FleetRuntime implements FleetAgentBridge {
                     var row = new LinkedHashMap<String, Object>();
                     row.put("id", step.id()); row.put("action", step.action()); row.put("description", step.description());
                     row.put("status", status); row.put("result", feedback); row.put("parameters", step.parameters());
+                    receipts.stream().filter(receipt -> step.id().equals(receipt.get("stepId"))).findFirst()
+                            .ifPresent(receipt -> row.put("tradeReceipt", receipt));
                     row.put("destination", step.parameters().getOrDefault("destinationId", step.parameters().getOrDefault("marketId", "")));
                     row.put("item", step.parameters().getOrDefault("itemId", "")); row.put("quantity", step.parameters().getOrDefault("quantity", 0));
                     row.put("submarket", step.parameters().getOrDefault("submarketId", "")); steps.add(row);
@@ -215,9 +259,10 @@ public final class FleetRuntime implements FleetAgentBridge {
     @Override public void close() {
         // 宿主在读档时可从其他线程释放旧运行区；只取消后台工作，不触碰旧世界对象。
         closed = true;
+        if (agent != null) agent.cancelBackground();
         if (planner != null) planner.close();
     }
-    @Override public boolean isStopped() { return planner == null || planner.isStopped(); }
+    @Override public boolean isStopped() { return agent != null ? agent.backgroundStopped() : planner == null || planner.isStopped(); }
 
     private CampaignFleetAPI controlled() {
         var fleet = GameWorld.find(sector, fleetId);

@@ -114,6 +114,8 @@ public final class Planner implements AutoCloseable {
     private PlanningResult convert(PlanningRequest request, PlanningService.Draft draft) {
         Objects.requireNonNull(draft, "规划输出");
         Objects.requireNonNull(draft.decision(), "规划决策");
+        if (request.completionReview() && draft.decision() == PlanningResult.Decision.KEEP)
+            throw new IllegalArgumentException("目标验收不能 KEEP，需要明确确认达成、重新规划或请玩家检查");
         ActionSpec.text(draft.reason(), "规划原因");
         Objects.requireNonNull(draft.steps(), "候选步骤");
         if (draft.decision() != PlanningResult.Decision.REPLACE && !draft.steps().isEmpty()) {

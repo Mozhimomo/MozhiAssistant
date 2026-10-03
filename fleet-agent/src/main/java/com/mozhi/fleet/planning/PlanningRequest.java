@@ -1,6 +1,7 @@
 package com.mozhi.fleet.planning;
 
 import com.mozhi.fleet.model.Plan;
+import com.mozhi.fleet.model.ResourceCheck;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -13,7 +14,15 @@ import java.util.Set;
  */
 public record PlanningRequest(String taskId, long revision, String goal, String worldState,
                               ExecutionHistory.Snapshot executionHistory, String trigger, List<ActionSpec> actions,
-                              Plan currentPlan) {
+                              Plan currentPlan, ResourceCheck resources, boolean completionReview) {
+    public PlanningRequest(String taskId, long revision, String goal, String worldState,
+                           ExecutionHistory.Snapshot executionHistory, String trigger, List<ActionSpec> actions, Plan currentPlan) {
+        this(taskId, revision, goal, worldState, executionHistory, trigger, actions, currentPlan, null, false);
+    }
+    public PlanningRequest(String taskId, long revision, String goal, String worldState,
+                           ExecutionHistory.Snapshot executionHistory, String trigger, List<ActionSpec> actions, Plan currentPlan, ResourceCheck resources) {
+        this(taskId, revision, goal, worldState, executionHistory, trigger, actions, currentPlan, resources, false);
+    }
     public PlanningRequest {
         ActionSpec.text(taskId, "任务 ID");
         if (revision < 0) throw new IllegalArgumentException("快照版本不能为负数");

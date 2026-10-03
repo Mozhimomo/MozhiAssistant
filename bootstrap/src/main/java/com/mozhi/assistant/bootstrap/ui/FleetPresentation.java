@@ -12,7 +12,7 @@ record FleetPresentation(String taskId, String planId, String goal, String statu
         String mode = text(state.get("mode"));
         String status = first(text(mission.get("status")), text(plan.get("status")), mode, "IDLE");
         if (mode.equals("LOST") || data.containsKey("error")) status = "BLOCKED";
-        if (mode.equals("MERGED")) status = "COMPLETED";
+        if (mode.equals("MERGED") && text(mission.get("status")).isBlank() && text(plan.get("status")).isBlank()) status = "COMPLETED";
         String goal = first(text(mission.get("originalGoal")), text(plan.get("goal")), text(state.get("order")), "尚未设置目标");
         List<Step> steps = new ArrayList<>();
         String failedResult = "";
@@ -23,7 +23,8 @@ record FleetPresentation(String taskId, String planId, String goal, String statu
         }
         String detail = switch (status) {
             case "BLOCKED", "FAILED" -> compact(first(text(data.get("error")), text(state.get("reason")), text(mission.get("reviewReason")), "请重新下达任务"));
-            case "COMPLETED" -> mode.equals("MERGED") ? "已回归，舰队资产已合并" : "目标已完成，可以下达新任务";
+            case "COMPLETED" -> mode.equals("MERGED") ? "已回归，舰队资产已合并" : "目标已完成，等待你决定是否返航";
+            case "REVIEWING" -> "计划已执行完，正在确认目标是否达成";
             case "PLANNING", "REPLANNING" -> steps.stream().anyMatch(step -> step.status().equals("FAILED"))
                     ? compact(first(failedResult, "步骤执行失败，正在重新规划")) : "正在安排接下来的行动";
             case "CANCELLED" -> "任务已取消，等待新指令";
@@ -45,6 +46,7 @@ record FleetPresentation(String taskId, String planId, String goal, String statu
     }
     static String label(String status) { return switch (status) {
         case "COMPLETED", "SUCCEEDED" -> "已完成"; case "BLOCKED", "FAILED" -> "需要处理";
+        case "REVIEWING" -> "验收中";
         case "PLANNING", "REPLANNING" -> "规划中"; case "EXECUTING", "RUNNING" -> "执行中";
         case "WAITING", "PAUSED" -> "等待中"; case "CANCELLED" -> "已取消";
         case "PENDING", "READY" -> "待执行"; default -> "等待指令";
@@ -55,7 +57,7 @@ record FleetPresentation(String taskId, String planId, String goal, String statu
         String line = value.replaceAll("\\s+", " ").trim();
         return line.length() > 64 ? line.substring(0, 63) + "…" : line;
     }
-    private static String action(String name) { return switch (name) { case "MOVE_TO" -> "前往目的地"; case "BUY" -> "购买货物"; case "SELL" -> "出售货物"; case "RETURN" -> "返回玩家舰队"; default -> "执行步骤"; }; }
+    private static String action(String name) { return switch (name) { case "MOVE_TO" -> "前往目的地"; case "BUY" -> "购买货物"; case "SELL" -> "出售货物"; case "RETURN" -> "返回玩家舰队"; case "CALCULATE_TRADE_ROUTE" -> "计算跑商路线"; default -> "执行步骤"; }; }
     private static String first(String... values) { for (String value : values) if (!value.isBlank()) return value; return ""; }
     private static Map<?, ?> map(Object value) { return value instanceof Map<?, ?> map ? map : Map.of(); }
     private static List<?> list(Object value) { return value instanceof List<?> list ? list : List.of(); }

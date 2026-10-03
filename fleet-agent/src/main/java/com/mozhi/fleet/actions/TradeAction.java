@@ -8,6 +8,7 @@ import com.fs.starfarer.api.campaign.econ.SubmarketAPI;
 import com.fs.starfarer.api.fleet.FleetMemberAPI;
 import com.mozhi.fleet.model.ExecutionResult;
 import com.mozhi.fleet.model.Step;
+import com.mozhi.fleet.model.TradeReceipt;
 import com.mozhi.fleet.planning.ActionSpec;
 import java.util.List;
 import java.util.Locale;
@@ -24,7 +25,7 @@ abstract class TradeAction implements Action {
         this.buy = buy;
         spec = new ActionSpec(buy ? "BUY" : "SELL",
                 (buy ? "购买" : "出售") + "指定交易区的真实货物或舰船。必须先 MOVE_TO 对应市场并实际入轨；"
-                        + "按实时库存、价格和关税一次性成交，库存或资金不足时失败；不自动导航，不部分成交。",
+                        + "按实时库存、价格和关税一次性成交，成功返回 tradeReceipt 实际支出 creditsSpent、收入 creditsReceived 及含税报价 quotedTotal；库存或资金不足时失败；不自动导航，不部分成交。",
                 List.of(ActionSupport.parameter("marketId", ActionSpec.Type.STRING, true, "市场 ID"),
                         ActionSupport.parameter("submarketId", ActionSpec.Type.STRING, true, "交易区 ID；不可使用免费仓储或隐藏交易区"),
                         ActionSupport.parameter("itemType", ActionSpec.Type.STRING, true, "COMMODITY、WEAPON、FIGHTER、HULLMOD、SPECIAL 或 SHIP"),
@@ -97,9 +98,11 @@ abstract class TradeAction implements Action {
             transaction.credits(context.fleet().getCargo(), next);
             context.fleet().forceSync();
         } catch (RuntimeException failure) { throw transaction.rollback(failure); }
-        return ActionSupport.result(step, SUCCEEDED, String.format(Locale.ROOT,
+        double actual = buy ? (double) balance - next : (double) next - balance;
+        TradeReceipt receipt = new TradeReceipt(buy ? actual : 0, buy ? 0 : actual, total);
+        return new ExecutionResult(step, SUCCEEDED, String.format(Locale.ROOT,
                 "已在 %s / %s %s %d × %s，%s %.0f 信用点（含关税）", market.getName(), shopId,
-                buy ? "购买" : "出售", quantity, itemId, buy ? "支出" : "收入", total));
+                buy ? "购买" : "出售", quantity, itemId, buy ? "支出" : "收入", actual), null, receipt);
     }
 
     private static boolean matches(CargoStackAPI stack, ItemType type, String id, String data) {
@@ -119,8 +122,7 @@ abstract class TradeAction implements Action {
                          CargoStackAPI stack, FleetMemberAPI ship, int quantity) {
         double base;
         if (ship != null) base = buy ? ship.getBaseBuyValue() : ship.getBaseSellValue();
-        else if (stack.isCommodityStack()) base = buy ? market.getSupplyPrice(stack.getCommodityId(), quantity, true)
-                : market.getDemandPrice(stack.getCommodityId(), quantity, true);
+        else if (stack.isCommodityStack()) return CommodityPricing.quote(market, shop, stack.getCommodityId(), quantity, buy);
         else {
             base = (double) (stack.isSpecialStack() && stack.getPlugin() != null
                     ? stack.getPlugin().getPrice(market, shop) : stack.getBaseValuePerUnit()) * quantity;

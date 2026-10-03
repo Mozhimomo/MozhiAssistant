@@ -9,4 +9,7 @@ public interface Action {
     ActionSpec spec();
     ExecutionResult execute(Step step, ActionContext context);
     default void stop(ActionContext context) {}
+    /** 读档释放运行区时可从其他线程调用，只取消后台计算，不访问游戏对象。 */
+    default void cancelBackground() {}
+    default boolean backgroundStopped() { return true; }
 }

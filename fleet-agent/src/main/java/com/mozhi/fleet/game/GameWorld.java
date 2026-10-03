@@ -4,6 +4,11 @@ import com.fs.starfarer.api.campaign.*;
 import com.fs.starfarer.api.campaign.econ.MarketAPI;
 import com.fs.starfarer.api.impl.campaign.ids.MemFlags;
 import com.mozhi.fleet.model.Plan;
+import com.mozhi.fleet.model.FleetResources;
+import com.mozhi.fleet.model.ResourceCheck;
+import com.mozhi.fleet.execution.Monitor;
+import com.mozhi.fleet.actions.ActionContext;
+import com.fs.starfarer.api.Global;
 import java.util.*;
 
 /** 游戏对象只在主线程读取；提供给 Planner 的内容全部是文本可序列化数据。 */
@@ -68,6 +73,12 @@ public final class GameWorld {
         return matches.iterator().next();
     }
 
+    public static FleetResources resources(CampaignFleetAPI fleet) {
+        var cargo = fleet.getCargo(); var logistics = fleet.getLogistics();
+        return new FleetResources(cargo.getFuel(), cargo.getMaxFuel(), logistics.getFuelCostPerLightYear(),
+                cargo.getSupplies(), logistics.getTotalSuppliesPerDay(), cargo.getCrew(), fleet.getFleetData().getMinCrew());
+    }
+
     public static Map<String, Object> describe(CampaignFleetAPI fleet) {
         var cargo = fleet.getCargo();
         var data = new LinkedHashMap<String, Object>();
@@ -75,6 +86,10 @@ public final class GameWorld {
         data.put("credits", cargo.getCredits().get()); data.put("supplies", cargo.getSupplies());
         data.put("supplyDays", daily > 0 ? cargo.getSupplies() / daily : 0);
         data.put("fuel", cargo.getFuel()); data.put("fuelCapacity", cargo.getMaxFuel());
+        float fuelPerLy = fleet.getLogistics().getFuelCostPerLightYear();
+        data.put("fuelPerLightYear", fuelPerLy); data.put("suppliesPerDay", daily);
+        data.put("fuelRangeLy", fuelPerLy > 0 ? cargo.getFuel() / fuelPerLy : null);
+        data.put("cargoSpaceLeft", cargo.getSpaceLeft()); data.put("crewSpaceLeft", cargo.getFreeCrewSpace());
         data.put("crew", cargo.getCrew()); data.put("requiredCrew", fleet.getFleetData().getMinCrew());
         data.put("readiness", fleet.getFleetData().getMembersListCopy().stream()
                 .filter(ship -> !ship.isMothballed()).mapToDouble(ship -> ship.getRepairTracker().getCR()).average().orElse(0));
@@ -112,7 +127,11 @@ public final class GameWorld {
     }
 
     public static Map<String, Object> observations(SectorAPI sector, CampaignFleetAPI fleet, String goal, Plan plan) {
-        if ("回归玩家舰队".equals(goal) && plan != null && plan.steps().size() == 1 && "RETURN".equals(plan.steps().get(0).action()))
+        return observations(sector, fleet, goal, plan, new Monitor().checkResources(resources(fleet)));
+    }
+
+    public static Map<String, Object> observations(SectorAPI sector, CampaignFleetAPI fleet, String goal, Plan plan, ResourceCheck resources) {
+        if (resources.status() == ResourceCheck.Status.READY && "回归玩家舰队".equals(goal) && plan != null && plan.steps().size() == 1 && "RETURN".equals(plan.steps().get(0).action()))
             return Map.of("controlledFleet", fleet(fleet), "playerFleet", fleet(sector.getPlayerFleet()));
         String query = goal.toLowerCase(Locale.ROOT);
         if (plan != null) query += " " + plan.steps().stream().map(step -> step.parameters().toString()).toList();
@@ -152,6 +171,8 @@ public final class GameWorld {
             row.put("submarkets", shops); catalog.add(row);
         }
         return Map.of("controlledFleet", fleet(fleet), "playerFleet", fleet(sector.getPlayerFleet()), "markets", catalog, "matchingDestinations", destinations,
+                "resourceMarkets", resources.status() == ResourceCheck.Status.REPLAN
+                        ? ResourceMarkets.collect(new ActionContext(sector, fleet, Global.getSettings(), Global.getFactory()), resources) : Map.of(),
                 "systems", sector.getStarSystems().stream().map(system -> Map.of("destinationId", system.getId(), "name", system.getName())).toList(),
                 "inventoryScope", "指定目标市场、当前计划中的市场和已环绕市场包含库存；其他市场仅列 ID，缺少信息时不要编造");
     }

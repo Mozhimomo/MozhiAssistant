@@ -13,6 +13,7 @@ public final class ModelChecks {
         orderedStepsAndIdentity();
         invalidDefinitions();
         jsonRoundTrip();
+        generatedPlans();
         System.out.println("Plan / Step checks passed");
     }
 
@@ -91,6 +92,28 @@ public final class ModelChecks {
         String invalid = data.replace("\"action\":\"BUY\"", "\"action\":\"\"");
         rejects(com.fasterxml.jackson.databind.JsonMappingException.class,
                 () -> mapper.readValue(invalid, Plan.class));
+    }
+
+    private static void generatedPlans() throws Exception {
+        Step calc = Step.create("CALCULATE_TRADE_ROUTE", Map.of(), "计算", "路线就绪");
+        Step tail = Step.create("RETURN", Map.of(), "回归", "合并");
+        Step trade = Step.create("BUY", Map.of(), "购买", "完成交易");
+        Plan original = Plan.create("跑商后回归", List.of(calc, tail));
+        Plan child = Plan.create("计算路线", List.of(trade));
+        Plan expanded = original.insertAfter(0, child);
+        check(expanded.steps().equals(List.of(calc, trade, tail)), "Insert immediately after decision, before original suffix");
+        check(expanded.goal().equals(original.goal()) && !expanded.id().equals(original.id()), "Keep goal and renew plan identity");
+        check(original.steps().equals(List.of(calc, tail)), "Original snapshot remains immutable");
+        rejects(IllegalArgumentException.class, () -> original.insertAfter(0, Plan.create("collision", List.of(tail))));
+        rejects(IllegalArgumentException.class, () -> original.insertAfter(-1, child));
+        rejects(IllegalArgumentException.class, () -> original.insertAfter(2, child));
+        ObjectMapper json = new ObjectMapper();
+        ExecutionResult result = new ExecutionResult(calc, ExecutionResult.Status.SUCCEEDED, "计算成功", child);
+        check(json.readValue(json.writeValueAsString(result), ExecutionResult.class).equals(result), "Generated plan survives JSON round trip");
+        var legacy = json.valueToTree(result); ((com.fasterxml.jackson.databind.node.ObjectNode) legacy).remove("generatedPlan");
+        check(json.treeToValue(legacy, ExecutionResult.class).generatedPlan() == null, "Old saves without generatedPlan remain readable");
+        for (var status : List.of(ExecutionResult.Status.RUNNING, ExecutionResult.Status.WAITING, ExecutionResult.Status.FAILED))
+            rejects(IllegalArgumentException.class, () -> new ExecutionResult(calc, status, "invalid", child));
     }
 
     private static void check(boolean condition, String message) {

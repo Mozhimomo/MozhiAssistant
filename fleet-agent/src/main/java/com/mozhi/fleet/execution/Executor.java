@@ -2,6 +2,7 @@ package com.mozhi.fleet.execution;
 
 import com.mozhi.fleet.actions.*;
 import com.mozhi.fleet.model.ExecutionResult;
+import com.mozhi.fleet.model.FleetResources;
 import com.mozhi.fleet.model.Plan;
 import com.mozhi.fleet.model.Step;
 import com.mozhi.fleet.planning.ActionSpec;
@@ -25,7 +26,7 @@ public final class Executor {
     private String blockedReason = "";
 
     public Executor(ActionContext context, ExecutionHistory history) {
-        this(context, history, List.of(new BuyAction(), new SellAction(), new MoveToAction(), new ReturnToPlayerAction()));
+        this(context, history, List.of(new BuyAction(), new SellAction(), new MoveToAction(), new ReturnToPlayerAction(), new CalculateTradeRouteAction()));
     }
 
     public Executor(ActionContext context, ExecutionHistory history, List<Action> actions) {
@@ -39,7 +40,37 @@ public final class Executor {
     /** 与实际执行使用同一份动作契约，直接传给 PlanningRequest。 */
     public List<ActionSpec> actionSpecs() { return actions.values().stream().map(Action::spec).toList(); }
 
+    public void validatePlan(Plan plan) {
+        for (int i = 0; i < plan.steps().size(); i++) {
+            Step step = plan.steps().get(i);
+            Action action = actions.get(step.action());
+            if (action == null) throw new IllegalArgumentException("未知动作：" + step.action());
+            action.spec().validate(step.parameters());
+            if (step.action().equals("RETURN") && i != plan.steps().size() - 1) throw new IllegalArgumentException("RETURN 必须在末尾");
+        }
+    }
+
+    public void validateGeneratedPlan(Plan plan) {
+        requireOwner();
+        validatePlan(plan);
+        var completed = history.snapshot().completedStepIds();
+        for (Step step : plan.steps()) if (terminal.containsKey(step.id()) || completed.contains(step.id()))
+            throw new IllegalArgumentException("决策结果不能重复已执行的步骤：" + step.id());
+    }
+
+    public void cancelBackground() { actions.values().forEach(Action::cancelBackground); }
+    public boolean backgroundStopped() { return actions.values().stream().allMatch(Action::backgroundStopped); }
+
     public ExecutionHistory.Snapshot historySnapshot() { requireOwner(); return history.snapshot(); }
+    public List<ExecutionResult> tradeResults() {
+        requireOwner();
+        return terminal.values().stream().filter(result -> result.tradeReceipt() != null).toList();
+    }
+
+    public FleetResources resources() {
+        requireOwner();
+        return com.mozhi.fleet.game.GameWorld.resources(context.fleet());
+    }
 
     public State snapshot() {
         requireOwner();

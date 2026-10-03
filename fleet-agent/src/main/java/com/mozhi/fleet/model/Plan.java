@@ -1,6 +1,7 @@
 package com.mozhi.fleet.model;
 
 import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -26,5 +27,14 @@ public record Plan(String id, String goal, List<Step> steps) {
     /** 为新计划分配 ID；重规划可复用仍然有效的 Step，保留其身份。 */
     public static Plan create(String goal, List<Step> steps) {
         return new Plan(UUID.randomUUID().toString(), goal, steps);
+    }
+
+    /** 在刚完成的步骤之后展开决策结果，保留原始目标、已有步骤身份及后续步骤。 */
+    public Plan insertAfter(int stepIndex, Plan addition) {
+        if (stepIndex < 0 || stepIndex >= steps.size()) throw new IllegalArgumentException("插入位置越界");
+        List<Step> expanded = new ArrayList<>(steps.subList(0, stepIndex + 1));
+        expanded.addAll(Objects.requireNonNull(addition).steps());
+        expanded.addAll(steps.subList(stepIndex + 1, steps.size()));
+        return create(goal, expanded);
     }
 }

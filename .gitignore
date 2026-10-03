@@ -13,3 +13,5 @@
 /data/config/agent.properties
 /data/memory/
 /dist/
+# Local algorithm reference; not a source or runtime dependency.
+/starsector-trade-route-planner-master/

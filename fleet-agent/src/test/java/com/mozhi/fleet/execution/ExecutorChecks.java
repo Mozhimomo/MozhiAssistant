@@ -96,26 +96,42 @@ public final class ExecutorChecks {
         check(error.get() instanceof IllegalStateException, "Reject background game operations");
     }
 
-    private static void tradingAndHistory() {
+    private static void tradingAndHistory() throws Exception {
         World world = new World();
         Executor executor = world.executor();
-        check(executor.actionSpecs().stream().map(spec -> spec.name()).toList().equals(List.of("BUY", "SELL", "MOVE_TO", "RETURN")),
+        check(executor.actionSpecs().stream().map(spec -> spec.name()).toList().equals(List.of("BUY", "SELL", "MOVE_TO", "RETURN", "CALCULATE_TRADE_ROUTE")),
                 "Planner sees the exact implemented action set");
         status(executor.execute(trade("BUY", "COMMODITY", "supplies", 1)), FAILED);
         check(world.fleet.assignments == 0 && world.shop.quantity(SUPPLIES) == 20, "Remote purchase fails without navigation or transfer");
         world.orbit();
         world.fleet.cargo.credits.set(600);
         Step buy = trade("BUY", "COMMODITY", "supplies", 5);
-        status(executor.execute(buy), SUCCEEDED);
-        status(executor.execute(buy), SUCCEEDED);
+        var bought = executor.execute(buy);
+        status(bought, SUCCEEDED);
+        check(bought.tradeReceipt().creditsSpent() == 600 && bought.tradeReceipt().creditsReceived() == 0
+                && bought.tradeReceipt().quotedTotal() == 600, "Buy returns actual cost including tariff");
+        check(executor.execute(buy).equals(bought), "Cached buy returns identical receipt");
         check(world.fleet.cargo.quantity(SUPPLIES) == 5 && world.shop.quantity(SUPPLIES) == 15
                 && world.fleet.cargo.credits.get() == 0, "Purchase transfers real stock and charges once including tariff");
         Step sell = trade("SELL", "COMMODITY", "supplies", 2);
-        status(executor.execute(sell), SUCCEEDED);
-        status(executor.execute(sell), SUCCEEDED);
+        var sold = executor.execute(sell);
+        status(sold, SUCCEEDED);
+        check(sold.tradeReceipt().creditsSpent() == 0 && sold.tradeReceipt().creditsReceived() == 128,
+                "Sell returns actual net proceeds after tariff");
+        check(executor.execute(sell).equals(sold), "Cached sell returns identical receipt");
         check(world.fleet.cargo.quantity(SUPPLIES) == 3 && world.shop.quantity(SUPPLIES) == 17
                 && world.fleet.cargo.credits.get() == 128, "Sale moves real stock and settles once");
-        status(executor.execute(trade("BUY", "COMMODITY", "supplies", 2)), FAILED);
+        var failed = executor.execute(trade("BUY", "COMMODITY", "supplies", 2));
+        status(failed, FAILED);
+        check(failed.tradeReceipt() == null && executor.tradeResults().size() == 2, "Failed trade has no settlement receipt");
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var saved = mapper.readValue(mapper.writeValueAsString(executor.snapshot()), Executor.State.class);
+        var reloaded = new Executor(new ActionContext(world.sector, world.fleet.api, world.settings, world.factory), new ExecutionHistory());
+        reloaded.restore(saved);
+        check(reloaded.execute(buy).equals(bought) && reloaded.tradeResults().size() == 2, "Save preserves receipts without replay");
+        var legacy = mapper.valueToTree(bought);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) legacy).remove("tradeReceipt");
+        check(mapper.treeToValue(legacy, ExecutionResult.class).tradeReceipt() == null, "Legacy missing receipt remains unknown");
         check(world.shop.quantity(SUPPLIES) == 17, "Insufficient funds do not buy partially");
         world.fleet.cargo.credits.set(100000);
         world.shop.items.put(SUPPLIES, 1f);
@@ -135,6 +151,11 @@ public final class ExecutorChecks {
         Executor restored = world.executor();
         status(restored.execute(buy), FAILED);
         check(world.shop.quantity(SUPPLIES) == 1, "Completed history prevents replay after executor replacement");
+        World largeBalance = new World(); largeBalance.orbit();
+        largeBalance.fleet.cargo.credits.set(1_000_000_000);
+        var rounded = largeBalance.executor().execute(trade("BUY", "COMMODITY", "supplies", 1));
+        check(rounded.tradeReceipt().quotedTotal() == 120 && rounded.tradeReceipt().creditsSpent() == 128,
+                "Receipt reports actual float balance delta separately from quote");
     }
 
     private static void shipsAndOtherGoods() {
@@ -304,14 +325,17 @@ public final class ExecutorChecks {
         java.util.function.Supplier<com.mozhi.fleet.planning.Planner> planners = () -> new com.mozhi.fleet.planning.Planner(
                 com.mozhi.llm.LlmClient.of(new dev.langchain4j.model.chat.ChatModel() {
                     @Override public dev.langchain4j.model.chat.response.ChatResponse chat(dev.langchain4j.model.chat.request.ChatRequest request) {
-                        calls.incrementAndGet();
                         String prompt = request.messages().toString();
+                        if (prompt.contains("\"completionReview\":true")) return dev.langchain4j.model.chat.response.ChatResponse.builder()
+                                .aiMessage(dev.langchain4j.data.message.AiMessage.from("{\"decision\":\"GOAL_REACHED\",\"reason\":\"实际结果确认目标已达成\",\"steps\":[]}")).build();
+                        calls.incrementAndGet();
                         check(prompt.contains("open_market") && prompt.contains("supplies"), "World snapshot includes actual trade IDs");
                         String answer = """
                                 {"decision":"REPLACE","reason":"买补给后回归","steps":[
-                                {"reuseStepId":"","action":"BUY","parametersJson":"{\\"marketId\\":\\"market\\",\\"submarketId\\":\\"open_market\\",\\"itemType\\":\\"COMMODITY\\",\\"itemId\\":\\"supplies\\",\\"quantity\\":2}","description":"购买","expectedOutcome":"买入2补给"},
-                                {"reuseStepId":"","action":"RETURN","parametersJson":"{}","description":"回归","expectedOutcome":"合并"}]}
+                                {"reuseStepId":"","action":"BUY","parametersJson":"{\\"marketId\\":\\"market\\",\\"submarketId\\":\\"open_market\\",\\"itemType\\":\\"COMMODITY\\",\\"itemId\\":\\"supplies\\",\\"quantity\\":2}","description":"购买","expectedOutcome":"买入2补给"}
+                                ]}
                                 """;
+
                         return dev.langchain4j.model.chat.response.ChatResponse.builder()
                                 .aiMessage(dev.langchain4j.data.message.AiMessage.from(answer)).build();
                     }
@@ -328,22 +352,38 @@ public final class ExecutorChecks {
         String moved = runtime.command("{\"operation\":\"move\",\"destination\":\"market\"}");
         check(!json.readTree(moved).has("error"), "Direct movement bridge accepts known destination");
         runtime.advance(0); world.orbit(); runtime.advance(0);
+        long reviewDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (!json.valueToTree(runtime.view()).path("state").path("mission").path("status").asText().equals("COMPLETED") && System.nanoTime() < reviewDeadline) { runtime.advance(0); Thread.sleep(2); }
         check(json.valueToTree(runtime.view()).path("state").path("mission").path("status").asText().equals("COMPLETED"), "Movement requires actual orbit");
         check(calls.get() == 0, "Direct move does not require model");
-        runtime.command("{\"operation\":\"order\",\"instruction\":\"在 market 买2补给后回归\"}");
+        check(json.valueToTree(runtime.view()).path("state").path("awaitingReturnConfirmation").asBoolean(), "Unrequested return waits for player after success");
+        runtime.command("{\"operation\":\"order\",\"instruction\":\"在 market 买2补给后回归\",\"returnAfterCompletion\":true}");
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
         while (world.shop.quantity(SUPPLIES) == 20 && System.nanoTime() < deadline) { runtime.advance(0); Thread.sleep(2); }
         check(world.shop.quantity(SUPPLIES) == 18, "Game bridge drives a real BUY action: " + runtime.view());
+        check(json.valueToTree(runtime.view()).path("state").path("tradeReceipts").get(0).path("creditsSpent").asDouble() == 240,
+                "Status exposes actual purchase expense");
         runtime.save(); runtime.close();
         check(world.persistent.get(com.mozhi.fleet.game.FleetRuntime.SAVE_KEY) instanceof String, "Save only JSON, never private-loader objects");
         var restored = new com.mozhi.fleet.game.FleetRuntime(world.sector, planners, () -> world.fleet.api);
         restored.initialize("file:/unused.properties");
         check(json.valueToTree(restored.view()).path("state").path("plan").path("currentStep").asInt() == 1, "Restore the exact execution cursor");
-        restored.advance(0);
-        check(json.valueToTree(restored.view()).path("state").path("mode").asText().equals("MERGED"), "Resume RETURN after load");
+        check(json.valueToTree(restored.view()).path("state").path("plan").path("steps").get(0).path("tradeReceipt").path("creditsSpent").asDouble() == 240,
+                "Plan step retains purchase receipt after load");
+        reviewDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (!json.valueToTree(restored.view()).path("state").path("mode").asText().equals("MERGED") && System.nanoTime() < reviewDeadline) { restored.advance(0); Thread.sleep(2); }
+        check(json.valueToTree(restored.view()).path("state").path("mode").asText().equals("MERGED"), "Resume RETURN after load: " + restored.view());
         check(world.shop.quantity(SUPPLIES) == 18 && calls.get() == 1, "Load never repeats the completed purchase or replans it");
         check(world.player.cargo.quantity(SUPPLIES) == 42 && world.player.cargo.credits.get() == 4760, "Merge conserves assets after one purchase");
-        restored.close();
+        check(json.valueToTree(restored.view()).path("state").path("mission").path("status").asText().equals("COMPLETED"), "Authorized return happens after goal review");
+        restored.save(); restored.close();
+        var reviewing = new com.mozhi.fleet.game.FleetRuntime(world.sector, planners, () -> world.fleet.api);
+        reviewing.initialize("file:/unused.properties");
+        reviewDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (!json.valueToTree(reviewing.view()).path("state").path("mission").path("status").asText().equals("COMPLETED") && System.nanoTime() < reviewDeadline) { reviewing.advance(0); Thread.sleep(2); }
+        check(json.valueToTree(reviewing.view()).path("state").path("mission").path("status").asText().equals("COMPLETED"), "Review continues after merge and save/load without a controlled fleet");
+        check(world.player.cargo.quantity(SUPPLIES) == 42, "Review does not merge assets twice");
+        reviewing.close();
 
         World rollback = new World();
         rollback.entities.remove(rollback.fleet.api); rollback.fleet.location = null;
@@ -386,7 +426,9 @@ public final class ExecutorChecks {
                 var state = (Map<?, ?>) runtime.view().get("state");
                 check(state.get("mode").equals("MERGED"), "Packaged entry point can execute RETURN and report JDK-only state");
             } finally { runtime.close(); }
-            check(runtime.isStopped(), "Unused planner closes without a thread leak");
+            long stopDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while (!runtime.isStopped() && System.nanoTime() < stopDeadline) Thread.sleep(2);
+            check(runtime.isStopped(), "Review planner closes without a thread leak");
         }
         System.out.println("Packaged private classloader / bridge checks passed");
     }

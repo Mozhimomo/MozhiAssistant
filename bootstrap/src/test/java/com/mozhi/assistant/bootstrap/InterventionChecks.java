@@ -16,6 +16,8 @@ public final class InterventionChecks {
         detectionAndDelivery();
         busyAndStale();
         failureAndClose();
+        tankerCapacityNotice();
+        completedNotice();
         System.out.println("Intervention queue and chat delivery checks passed");
     }
 
@@ -78,6 +80,33 @@ public final class InterventionChecks {
         session.send("正在对话", false); waiting.chatEntered.await(2, TimeUnit.SECONDS); session.poll(); session.close();
         require(waiting.interrupted.await(2, TimeUnit.SECONDS), "save/session reset cancels old worker");
         require(waiting.notices.get() == 0, "closed session cannot dispatch queued notice");
+    }
+
+    private static void tankerCapacityNotice() throws Exception {
+        String reason = "加满燃料仍不足 15 光年，请购买油船并编入墨汁舰队";
+        var state = Map.<String, Object>of("state", Map.of("mode", "BLOCKED", "mission", Map.of("id", "tanker-task", "status", "BLOCKED", "originalGoal", "跑商",
+                "reviewReason", reason), "plan", Map.of("steps", List.of())));
+        FakeAgent agent = new FakeAgent();
+        try (AgentSession session = new AgentSession(agent, () -> state)) {
+            await(session, () -> agent.notices.get() == 1 && !session.busy());
+            require(agent.snapshot.contains("油船") && agent.snapshot.contains("15 光年"), "Capacity block reaches dialogue agent even without a failed execution step");
+            require(session.history().size() == 1, "Player intervention generates a chat message");
+        }
+    }
+
+    private static void completedNotice() throws Exception {
+        var state = Map.<String, Object>of("state", Map.of("mode", "COMPLETED", "awaitingReturnConfirmation", true,
+                "reason", "舰队信用点已达到100万", "mission", Map.of("id", "trade-task", "status", "COMPLETED", "originalGoal", "跑商到100万")));
+        FakeAgent agent = new FakeAgent();
+        try (AgentSession session = new AgentSession(agent, () -> state)) {
+            await(session, () -> agent.notices.get() == 1 && !session.busy());
+            require(agent.snapshot.contains("任务完成") && agent.snapshot.contains("询问是否返航") && !agent.snapshot.contains("异常原因"),
+                    "Completed task proactively asks for return permission without presenting failure");
+            Thread.sleep(550); session.poll();
+            require(agent.notices.get() == 1, "Completed task notifies once while waiting for player");
+        }
+        require(FleetIntervention.from(Map.of("state", Map.of("mode", "MERGED", "mission", Map.of("status", "COMPLETED")))) == null,
+                "Already merged fleet never asks whether to return");
     }
 
     private static Map<String, Object> view(String status, String task) {

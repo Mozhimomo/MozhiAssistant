@@ -228,7 +228,7 @@ public final class AgentSession implements AutoCloseable {
     }
 
     private String notificationFailure() {
-        return activeIntervention == null ? "" : "舰队需要你介入，墨汁暂时未能生成说明。\n" + activeIntervention.snapshot() + "\n";
+        return activeIntervention == null ? "" : (activeIntervention.completed() ? "舰队任务已完成，是否返航？墨汁暂时未能生成说明。\n" : "舰队需要你介入，墨汁暂时未能生成说明。\n") + activeIntervention.snapshot() + "\n";
     }
 
     public String status() {

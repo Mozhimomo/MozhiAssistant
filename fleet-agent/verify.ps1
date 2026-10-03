@@ -15,6 +15,8 @@ $taskSources = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src/main/j
 if ($LASTEXITCODE -ne 0) { throw 'Fleet check compilation failed' }
 & java -cp ($taskOutput + [IO.Path]::PathSeparator + $taskClasspath) com.mozhi.fleet.model.ModelChecks
 if ($LASTEXITCODE -ne 0) { throw 'Model checks failed' }
+& java -cp ($taskOutput + [IO.Path]::PathSeparator + $taskClasspath) com.mozhi.fleet.execution.ResourceChecks
+if ($LASTEXITCODE -ne 0) { throw 'Resource monitor checks failed' }
 & java -cp ($taskOutput + [IO.Path]::PathSeparator + $taskClasspath) com.mozhi.fleet.planning.PlannerChecks
 if ($LASTEXITCODE -ne 0) { throw 'Planner checks failed' }
 $taskPackageArgs = @()
@@ -23,3 +25,7 @@ if ($CheckPackaged) { $taskPackageArgs = @($taskRoot) }
 if ($LASTEXITCODE -ne 0) { throw 'Executor checks failed' }
 & java -cp ($taskOutput + [IO.Path]::PathSeparator + $taskClasspath) com.mozhi.fleet.AgentChecks
 if ($LASTEXITCODE -ne 0) { throw 'Agent checks failed' }
+& java -cp ($taskOutput + [IO.Path]::PathSeparator + $taskClasspath) com.mozhi.fleet.trading.TradeRouteChecks
+if ($LASTEXITCODE -ne 0) { throw 'Trade route checks failed' }
+& java -cp ($taskOutput + [IO.Path]::PathSeparator + $taskClasspath) com.mozhi.fleet.trading.TradeSnapshotChecks
+if ($LASTEXITCODE -ne 0) { throw 'Trade snapshot checks failed' }

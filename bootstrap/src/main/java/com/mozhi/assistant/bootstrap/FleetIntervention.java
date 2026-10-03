@@ -4,12 +4,13 @@ import java.util.List;
 import java.util.Map;
 
 /** 主线程采集的异常快照；后台通知生成不再读取游戏对象。 */
-record FleetIntervention(String taskId, String planId, String goal, String step, String reason) {
+record FleetIntervention(String taskId, String planId, String goal, String step, String reason, boolean completed) {
     static FleetIntervention from(Map<String, Object> data) {
         Map<?, ?> state = map(data.get("state")), mission = map(state.get("mission")), plan = map(state.get("plan"));
         String mode = text(state.get("mode"));
         String status = first(text(mission.get("status")), text(plan.get("status")), mode);
-        if (!mode.equals("LOST") && !status.equals("BLOCKED") && !status.equals("FAILED")) return null;
+        boolean completed = status.equals("COMPLETED") && Boolean.TRUE.equals(state.get("awaitingReturnConfirmation"));
+        if (!completed && !mode.equals("LOST") && !status.equals("BLOCKED") && !status.equals("FAILED")) return null;
         String step = "";
         if (plan.get("steps") instanceof List<?> steps) {
             int current = plan.get("currentStep") instanceof Number number ? number.intValue() : -1;
@@ -17,10 +18,12 @@ record FleetIntervention(String taskId, String planId, String goal, String step,
         }
         return new FleetIntervention(text(mission.get("id")), text(plan.get("id")),
                 first(text(mission.get("originalGoal")), text(plan.get("goal")), text(state.get("order")), "舰队任务"), step,
-                first(text(state.get("reason")), text(mission.get("reviewReason")), mode.equals("LOST") ? "舰队已失联或移除" : "任务无法继续，需要玩家确认"));
+                first(text(state.get("reason")), text(mission.get("reviewReason")), mode.equals("LOST") ? "舰队已失联或移除" : "任务无法继续，需要玩家确认"), completed);
     }
 
     String snapshot() {
+        if (completed) return "事件：任务完成，等待玩家决定是否返航\n目标：" + goal + "\n验收结论：" + reason
+                + "\n分舰队尚未返航。请主动告知舰长任务已完成，并询问是否返航；等待玩家答复。";
         return "目标：" + goal + "\n受阻步骤：" + (step.isBlank() ? "未确定" : step) + "\n异常原因：" + reason;
     }
     private static Map<?, ?> map(Object value) { return value instanceof Map<?, ?> map ? map : Map.of(); }

@@ -31,6 +31,14 @@ public final class NotificationChecks {
         model.notification = false;
         agent.chat("那就买 50");
         require(model.request.messages().stream().anyMatch(message -> message instanceof AiMessage ai && notice.equals(ai.text())), "player follow-up retains generated notice");
+        model.notification = true; model.completed = true;
+        String completed = agent.notifyFleetIntervention("事件：任务完成，等待玩家决定是否返航\n验收结论：舰队拥有100万信用点", AgentStreamListener.NONE);
+        require(completed.contains("是否返航") && model.request.messages().toString().contains("不把任务成功说成异常"),
+                "Completion uses notification instructions to ask for return permission");
+        model.notification = false;
+        agent.chat("先别回来");
+        require(model.request.messages().stream().anyMatch(message -> message instanceof AiMessage ai && completed.equals(ai.text())),
+                "Return question remains in conversation for the player's decision");
         model.notification = true; model.attemptTool = true;
         boolean rejected = false;
         try { agent.notifyFleetIntervention("库存不足", AgentStreamListener.NONE); }
@@ -47,14 +55,14 @@ public final class NotificationChecks {
     private static void require(boolean value, String message) { if (!value) throw new AssertionError(message); }
 
     private static final class FakeModel implements LlmClient {
-        boolean notification, attemptTool;
+        boolean notification, attemptTool, completed;
         ChatRequest request;
         public ChatResponse stream(ChatRequest request, LlmStreamListener listener) {
             this.request = request;
             if (notification) require(request.toolSpecifications() == null || request.toolSpecifications().isEmpty(), "notification must offer no tools");
             AiMessage response = attemptTool
                     ? AiMessage.from(ToolExecutionRequest.builder().id("unauthorized").name("rememberFact").arguments("{\"content\":\"bad\",\"category\":\"test\"}").build())
-                    : AiMessage.from(notification ? "舰长，库存不足，需要调整数量。" : "收到。");
+                    : AiMessage.from(notification ? completed ? "舰长，100万目标已达成，是否返航？" : "舰长，库存不足，需要调整数量。" : "收到。");
             return ChatResponse.builder().aiMessage(response).build();
         }
         public ChatResponse chat(ChatRequest request) { throw new AssertionError("unexpected compression request"); }
