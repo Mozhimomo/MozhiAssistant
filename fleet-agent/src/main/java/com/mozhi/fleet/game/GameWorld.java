@@ -30,6 +30,23 @@ public final class GameWorld {
         fleet.getMemoryWithoutUpdate().set(MemFlags.MEMORY_KEY_FLEET_DO_NOT_GET_SIDETRACKED, true);
     }
 
+    /** 对话命令接受名称，进入计划后固定为 ID，避免重名舰队或名称变化导致换目标。 */
+    public static CampaignFleetAPI followTarget(SectorAPI sector, String query) {
+        if (query.equals("player") || query.equals("玩家") || query.equals("玩家舰队")) {
+            var player = sector.getPlayerFleet();
+            if (player == null || player.isExpired()) throw new IllegalArgumentException("玩家舰队不可用");
+            return player;
+        }
+        var exact = find(sector, query);
+        if (exact != null && !exact.isExpired()) return exact;
+        var matches = new LinkedHashSet<CampaignFleetAPI>();
+        for (var location : sector.getAllLocations()) for (var fleet : location.getFleets())
+            if (!fleet.isExpired() && query.equalsIgnoreCase(fleet.getName())) matches.add(fleet);
+        if (matches.size() != 1) throw new IllegalArgumentException(matches.isEmpty() ? "未找到目标舰队：" + query
+                : "目标舰队重名，请指定 ID：" + matches.stream().map(fleet -> fleet.getName() + " [" + fleet.getId() + "]").toList());
+        return matches.iterator().next();
+    }
+
     public static void hold(CampaignFleetAPI fleet) {
         if (fleet.isExpired() || fleet.getBattle() != null || fleet.isInHyperspaceTransition()) return;
         var focus = fleet.getOrbit() == null ? null : fleet.getOrbit().getFocus();
@@ -99,6 +116,7 @@ public final class GameWorld {
     public static Map<String, Object> item(CargoStackAPI stack) {
         var data = new LinkedHashMap<String, Object>();
         data.put("name", stack.getDisplayName()); data.put("quantity", stack.getSize());
+        data.put("wholeQuantity", Float.isFinite(stack.getSize()) ? (long) Math.max(0, Math.floor(stack.getSize())) : 0);
         if (stack.isCommodityStack()) { data.put("itemType", "COMMODITY"); data.put("itemId", stack.getCommodityId()); }
         else if (stack.isWeaponStack()) { data.put("itemType", "WEAPON"); data.put("itemId", stack.getWeaponSpecIfWeapon().getWeaponId()); }
         else if (stack.isFighterWingStack()) { data.put("itemType", "FIGHTER"); data.put("itemId", stack.getFighterWingSpecIfWing().getId()); }
@@ -145,12 +163,15 @@ public final class GameWorld {
         for (var market : markets(sector)) {
             var entity = market.getPrimaryEntity();
             if (entity == null || entity.isExpired()) continue;
+            boolean relevant = query.contains(market.getId().toLowerCase(Locale.ROOT))
+                    || query.contains(market.getName().toLowerCase(Locale.ROOT)) || query.contains(entity.getId().toLowerCase(Locale.ROOT))
+                    || mentioned(query, entity.getName())
+                    || fleet.getOrbit() != null && fleet.getOrbit().getFocus() == entity;
+            if (!relevant) continue;
             var row = new LinkedHashMap<String, Object>();
             row.put("marketId", market.getId()); row.put("name", market.getName()); row.put("destinationId", entity.getId());
             row.put("location", entity.getContainingLocation().getName()); row.put("locationId", entity.getContainingLocation().getId());
-            boolean relevant = query.contains(market.getId().toLowerCase(Locale.ROOT))
-                    || query.contains(market.getName().toLowerCase(Locale.ROOT)) || query.contains(entity.getId().toLowerCase(Locale.ROOT))
-                    || fleet.getOrbit() != null && fleet.getOrbit().getFocus() == entity;
+            final String inventoryQuery = query;
             List<Map<String, Object>> shops = new ArrayList<>();
             for (var shop : market.getSubmarketsCopy()) {
                 if (shop.getPlugin() == null || shop.getPlugin().isHidden() || shop.getPlugin().isFreeTransfer()) continue;
@@ -159,21 +180,56 @@ public final class GameWorld {
                 if (relevant) {
                     try {
                         shop.getPlugin().updateCargoPrePlayerInteraction();
-                        var goods = shop.getCargo().getStacksCopy().stream().filter(stack -> stack.getSize() > 0).map(GameWorld::item).toList();
+                        var goods = shop.getCargo().getStacksCopy().stream().filter(stack -> stack.getSize() > 0).map(GameWorld::item)
+                                .filter(item -> mentioned(inventoryQuery, item.get("itemId")) || mentioned(inventoryQuery, item.get("name")))
+                                .sorted(Comparator.comparing(GameWorld::itemSortKey)).toList();
                         shopData.put("items", goods);
                         var ships = shop.getCargo().getMothballedShips();
-                        if (ships != null) shopData.put("ships", ships.getMembersListCopy().stream().map(ship -> Map.of(
-                                "itemType", "SHIP", "itemId", ship.getId(), "name", ship.getShipName(), "hull", ship.getHullId())).toList());
+                        if (ships != null) shopData.put("ships", ships.getMembersListCopy().stream()
+                                .filter(ship -> mentioned(inventoryQuery, ship.getId()) || mentioned(inventoryQuery, ship.getShipName()) || mentioned(inventoryQuery, ship.getHullId())
+                                        || ship.getHullSpec() != null && mentioned(inventoryQuery, ship.getHullSpec().getHullName()))
+                                .sorted(Comparator.comparing(ship -> ship.getId())).map(ship -> Map.of(
+                                "itemType", "SHIP", "itemId", ship.getId(), "name", ship.getShipName(), "hull", ship.getHullId(),
+                                "hullName", ship.getHullSpec() == null ? "" : ship.getHullSpec().getHullName())).toList());
                     } catch (RuntimeException error) { shopData.put("inventoryError", Objects.toString(error.getMessage(), "库存读取失败")); }
                 }
                 shops.add(shopData);
             }
+            shops.sort(Comparator.comparing(shop -> shop.get("submarketId").toString()));
             row.put("submarkets", shops); catalog.add(row);
         }
-        return Map.of("controlledFleet", fleet(fleet), "playerFleet", fleet(sector.getPlayerFleet()), "markets", catalog, "matchingDestinations", destinations,
-                "resourceMarkets", resources.status() == ResourceCheck.Status.REPLAN
+        catalog.sort(Comparator.comparing(market -> market.get("marketId").toString()));
+        destinations.sort(Comparator.comparing(destination -> destination.get("destinationId").toString()));
+        final String destinationQuery = query;
+        var player = sector.getPlayerFleet();
+        var controlled = fleet(fleet);
+        controlled.put("cargo", fleet.getCargo().getStacksCopy().stream().filter(stack -> stack.getSize() > 0).map(GameWorld::item)
+                .filter(item -> "COMMODITY".equals(item.get("itemType")) || mentioned(destinationQuery, item.get("itemId")) || mentioned(destinationQuery, item.get("name")))
+                .sorted(Comparator.comparing(GameWorld::itemSortKey)).toList());
+        controlled.put("cargoScope", "全部经济商品及目标相关物品，其他装备未列出；不代表没有持有");
+        List<Map<String, Object>> followTargets = new ArrayList<>();
+        if (query.contains("跟随") || query.contains("follow") || plan != null && plan.steps().stream().anyMatch(step -> step.tool().equals("FOLLOW_FLEET"))) {
+            for (var location : sector.getAllLocations()) for (var target : location.getFleets()) {
+                if (target == fleet || target.isExpired() || target.getContainingLocation() == null) continue;
+                if (target != player && !mentioned(query, target.getId()) && !mentioned(query, target.getName())) continue;
+                followTargets.add(Map.of("targetFleetId", target == player ? "player" : target.getId(), "name", target.getName(),
+                        "location", target.getContainingLocation().getName(), "x", target.getLocation().x, "y", target.getLocation().y,
+                        "inBattle", target.getBattle() != null, "inTransition", target.isInHyperspaceTransition()));
+            }
+        }
+        return Map.of("controlledFleet", controlled, "playerLocation", Map.of("locationId", player.getContainingLocation().getId(), "x", player.getLocation().x, "y", player.getLocation().y), "markets", catalog, "matchingDestinations", destinations,
+                "followTargets", followTargets,
+                "resourceMarkets", resources.status() == ResourceCheck.Status.ADVISORY
                         ? ResourceMarkets.collect(new ActionContext(sector, fleet, Global.getSettings(), Global.getFactory()), resources) : Map.of(),
-                "systems", sector.getStarSystems().stream().map(system -> Map.of("destinationId", system.getId(), "name", system.getName())).toList(),
-                "inventoryScope", "指定目标市场、当前计划中的市场和已环绕市场包含库存；其他市场仅列 ID，缺少信息时不要编造");
+                "systems", sector.getStarSystems().stream().filter(system -> mentioned(destinationQuery, system.getId()) || mentioned(destinationQuery, system.getName()))
+                        .sorted(Comparator.comparing(system -> system.getId())).map(system -> Map.of("destinationId", system.getId(), "name", system.getName())).toList(),
+                "inventoryScope", "仅目标、剩余计划及已环绕市场；库存仅目标或剩余计划提及的商品/舰船。省略不代表无货；自主跑商全市场搜索由 CALCULATE_TRADE_ROUTE 完成，资源采购看 resourceMarkets");
+    }
+
+    private static boolean mentioned(String query, Object value) {
+        return value != null && !value.toString().isBlank() && query.contains(value.toString().toLowerCase(Locale.ROOT));
+    }
+    private static String itemSortKey(Map<String, Object> item) {
+        return item.get("itemType") + ":" + item.get("itemId") + ":" + item.getOrDefault("itemData", "");
     }
 }

@@ -4,7 +4,7 @@ import com.fs.starfarer.api.Global;
 import org.lazywizard.console.BaseCommand;
 import org.lazywizard.console.Console;
 
-/** Registered in data/console/commands.csv. Network calls remain on AgentSession's worker. */
+/** 注册于 data/console/commands.csv；网络调用始终由 AgentSession 的工作线程执行。 */
 public final class MozhiAgentCommand implements BaseCommand {
     private static final String DEFAULT_PROMPT =
             "请调用工具读取舰队详情，逐舰列出型号、舰长、战备、武器和插件，再计算 17 + 25，并用中文回答。";
@@ -27,11 +27,11 @@ public final class MozhiAgentCommand implements BaseCommand {
             }
             if (Global.getSector().getCampaignUI().isShowingDialog()
                     || Global.getSector().getCampaignUI().getCurrentCoreTab() != null) {
-                Console.showMessage("Close other dialogs and core screens before opening Mozhi chat.");
+                Console.showMessage("请先关闭其他对话框和核心界面，再打开墨汁聊天。");
                 return CommandResult.WRONG_CONTEXT;
             }
             Console.showDialogOnClose(new ChatDialog(), Global.getSector().getPlayerFleet());
-            Console.showMessage("Close the console to open Mozhi chat.");
+            Console.showMessage("关闭控制台后即可打开墨汁聊天。");
             return CommandResult.SUCCESS;
         }
         if ("status".equalsIgnoreCase(action)) {
@@ -48,7 +48,7 @@ public final class MozhiAgentCommand implements BaseCommand {
         return CommandResult.BAD_SYNTAX;
     }
 
-    /** Entry point for custom manual checks. Must be invoked on the campaign main thread. */
+    /** 自定义手动检查入口，必须在战役主线程调用。 */
     public static CommandResult runTest(String message) {
         if (Global.getSector() == null || Global.getSector().getPlayerFleet() == null) {
             Console.showMessage("请先载入战役存档。");

@@ -25,12 +25,12 @@ final class AiServiceResponseModel implements ChatModel {
             if (Thread.currentThread().isInterrupted()) throw new CancellationException("请求已取消");
             ChatResponse response = delegate.chat(request);
             if (response != null && response.finishReason() == FinishReason.LENGTH) {
-                throw new IllegalStateException("模型达到输出上限，未完成结构化回答；"
+                throw new StructuredOutputException(StructuredOutputException.Kind.OUTPUT_LIMIT, "模型达到输出上限，未完成结构化回答；"
                         + "请增加 maxTokens/maxCompletionTokens 或降低思考预算。" + diagnostic(response));
             }
             if (hasAnswer(response)) return response;
             if (attempt == 1) {
-                throw new IllegalStateException("模型没有返回文本正文（已重试一次），无法解析结构化结果。"
+                throw new StructuredOutputException(StructuredOutputException.Kind.EMPTY_RESPONSE, "模型没有返回文本正文（已重试一次），无法解析结构化结果。"
                         + diagnostic(response));
             }
         }

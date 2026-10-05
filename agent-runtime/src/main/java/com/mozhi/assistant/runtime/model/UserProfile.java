@@ -78,7 +78,7 @@ public class UserProfile implements Serializable {
         private Boolean preferCode;
         /** 是否偏好列表/表格 */
         private Boolean preferStructured;
-        /** 自定义风格提示词，直接拼进 system prompt */
+        /** 自定义风格提示词，直接拼入系统提示词。 */
         private String styleHint;
     }
 

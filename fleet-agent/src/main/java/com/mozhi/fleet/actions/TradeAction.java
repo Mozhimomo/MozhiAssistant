@@ -9,7 +9,6 @@ import com.fs.starfarer.api.fleet.FleetMemberAPI;
 import com.mozhi.fleet.model.ExecutionResult;
 import com.mozhi.fleet.model.Step;
 import com.mozhi.fleet.model.TradeReceipt;
-import com.mozhi.fleet.planning.ActionSpec;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -19,36 +18,22 @@ import static com.mozhi.fleet.model.ExecutionResult.Status.SUCCEEDED;
 abstract class TradeAction implements Action {
     private enum ItemType { COMMODITY, WEAPON, FIGHTER, HULLMOD, SPECIAL, SHIP }
     private final boolean buy;
-    private final ActionSpec spec;
+    TradeAction(boolean buy) { this.buy = buy; }
 
-    TradeAction(boolean buy) {
-        this.buy = buy;
-        spec = new ActionSpec(buy ? "BUY" : "SELL",
-                (buy ? "购买" : "出售") + "指定交易区的真实货物或舰船。必须先 MOVE_TO 对应市场并实际入轨；"
-                        + "按实时库存、价格和关税一次性成交，成功返回 tradeReceipt 实际支出 creditsSpent、收入 creditsReceived 及含税报价 quotedTotal；库存或资金不足时失败；不自动导航，不部分成交。",
-                List.of(ActionSupport.parameter("marketId", ActionSpec.Type.STRING, true, "市场 ID"),
-                        ActionSupport.parameter("submarketId", ActionSpec.Type.STRING, true, "交易区 ID；不可使用免费仓储或隐藏交易区"),
-                        ActionSupport.parameter("itemType", ActionSpec.Type.STRING, true, "COMMODITY、WEAPON、FIGHTER、HULLMOD、SPECIAL 或 SHIP"),
-                        ActionSupport.parameter("itemId", ActionSpec.Type.STRING, true, "物品规格 ID；SHIP 必须使用舰船实例 ID"),
-                        ActionSupport.parameter("quantity", ActionSpec.Type.INTEGER, true, "1 至 1000000；SHIP 必须为 1"),
-                        ActionSupport.parameter("itemData", ActionSpec.Type.STRING, false, "仅 SPECIAL 使用；同 ID 多种特殊物品时必须给出实例数据")));
-    }
-
-    @Override public final ActionSpec spec() { return spec; }
-
-    @Override public final ExecutionResult execute(Step step, ActionContext context) {
-        int quantity = ActionSupport.quantity(step);
+    protected final ExecutionResult trade(Step step, ActionContext context, String marketId, String submarketId,
+                                           String itemType, String itemId, int quantity, String itemData) {
+        if (quantity < 1 || quantity > 1_000_000) throw new IllegalArgumentException("quantity 必须在 1 至 1000000 之间");
         ItemType type;
-        try { type = ItemType.valueOf(ActionSupport.text(step, "itemType")); }
+        try { type = ItemType.valueOf(itemType); }
         catch (IllegalArgumentException error) { throw new IllegalArgumentException("不支持的 itemType", error); }
-        String itemId = ActionSupport.text(step, "itemId");
+
         if (type != ItemType.SPECIAL && step.parameters().containsKey("itemData")) throw new IllegalArgumentException("只有 SPECIAL 接受 itemData");
         if (type == ItemType.SHIP && quantity != 1) throw new IllegalArgumentException("按舰船实例交易时 quantity 必须为 1");
-        MarketAPI market = ActionSupport.market(context, ActionSupport.text(step, "marketId"));
+        MarketAPI market = ActionSupport.market(context, marketId);
         if (!ActionSupport.orbiting(context.fleet(), ActionSupport.marketEntity(market))) {
             throw new IllegalStateException("尚未实际环绕指定市场，请先完成 MOVE_TO");
         }
-        String shopId = ActionSupport.text(step, "submarketId");
+        String shopId = submarketId;
         var matches = market.getSubmarketsCopy().stream().filter(shop -> shopId.equals(shop.getSpecId())).toList();
         if (matches.size() != 1) throw new IllegalArgumentException("交易区不存在或 ID 不唯一：" + shopId);
         SubmarketAPI shop = matches.get(0);
@@ -70,23 +55,24 @@ abstract class TradeAction implements Action {
             ship = found.get(0);
             if (!buy && ships.getNumMembers() <= 1) throw new IllegalArgumentException("不能出售分舰队最后一艘舰船");
         } else {
-            String data = step.parameters().containsKey("itemData") ? (String) step.parameters().get("itemData") : null;
+            String data = itemData;
             var found = source.getStacksCopy().stream().filter(entry -> matches(entry, type, itemId, data)).toList();
-            if (found.isEmpty()) throw new IllegalArgumentException("实际库存中没有该物品：" + itemId);
+            if (found.isEmpty()) throw unavailable(market, shopId, itemId, quantity, 0);
             stack = found.get(0);
             Object key = stack.getData();
             if (found.stream().anyMatch(entry -> !Objects.equals(entry.getData(), key))) {
                 throw new IllegalArgumentException("特殊物品存在多种实例数据，请指定 itemData");
             }
-            if (source.getQuantity(stack.getType(), stack.getData()) < quantity) throw new IllegalArgumentException("实际库存不足，未成交");
+            float available = source.getQuantity(stack.getType(), stack.getData());
+            if (!Float.isFinite(available) || available < quantity) throw unavailable(market, shopId, itemId, quantity, available);
         }
         double total = price(context, market, shop, stack, ship, quantity);
         float balance = context.fleet().getCargo().getCredits().get();
-        if (!Float.isFinite(balance) || balance < 0) throw new IllegalStateException("舰队信用点无效");
-        if (buy && balance < total) throw new IllegalArgumentException("信用点不足，需要 " + total + "，实际 " + balance);
+        if (!Float.isFinite(balance) || balance < 0) throw new IllegalStateException("舰队星币无效");
+        if (buy && balance < total) throw new IllegalArgumentException("星币不足，需要 " + total + "，实际 " + balance);
         float next = (float) (balance + (buy ? -total : total));
         if (!Float.isFinite(next) || next < 0) throw new IllegalArgumentException("交易金额超出可结算范围");
-        AssetTransaction transaction = new AssetTransaction();
+        AssetTransaction transaction = AssetTransaction.trade();
         try {
             if (ship != null) {
                 if (!buy && cargo.getMothballedShips() == null) cargo.initMothballedShips(shop.getFaction().getId());
@@ -101,8 +87,16 @@ abstract class TradeAction implements Action {
         double actual = buy ? (double) balance - next : (double) next - balance;
         TradeReceipt receipt = new TradeReceipt(buy ? actual : 0, buy ? 0 : actual, total);
         return new ExecutionResult(step, SUCCEEDED, String.format(Locale.ROOT,
-                "已在 %s / %s %s %d × %s，%s %.0f 信用点（含关税）", market.getName(), shopId,
+                "已在 %s / %s %s %d × %s，%s %.0f 星币（含关税）", market.getName(), shopId,
                 buy ? "购买" : "出售", quantity, itemId, buy ? "支出" : "收入", actual), null, receipt);
+    }
+
+    private IllegalArgumentException unavailable(MarketAPI market, String shopId, String itemId, int requested, float available) {
+        return new IllegalArgumentException("实际库存不足：市场 " + market.getId() + " / " + shopId + "，物品 " + itemId
+                + "，请求" + (buy ? "购买 " : "出售 ") + requested + "，"
+                + (buy ? "市场" : "舰队") + "实际库存 " + available + "，可成交整数数量 "
+                + (Float.isFinite(available) ? (long) Math.max(0, Math.floor(available)) : "未知")
+                + "；未成交，请重新规划；库存小数不是采购指令");
     }
 
     private static boolean matches(CargoStackAPI stack, ItemType type, String id, String data) {

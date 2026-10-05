@@ -23,7 +23,7 @@ final class DefaultLlmClient implements LlmClient {
 
     DefaultLlmClient(ChatModel model, StreamingChatModel streamingModel,
                      int timeoutSeconds, UnaryOperator<String> redact) {
-        this.model = Objects.requireNonNull(model, "model");
+        this.model = new MeasuredChatModel(Objects.requireNonNull(model, "model"));
         this.streamingModel = streamingModel;
         if (timeoutSeconds < 1) throw new IllegalArgumentException("timeoutSeconds 必须为正数");
         this.timeoutSeconds = timeoutSeconds;
@@ -55,7 +55,7 @@ final class DefaultLlmClient implements LlmClient {
     public <T> T aiService(Class<T> serviceType) {
         Objects.requireNonNull(serviceType, "serviceType");
         if (!serviceType.isInterface() || !Modifier.isPublic(serviceType.getModifiers())) {
-            throw new IllegalArgumentException("AI Service 必须是 public interface");
+            throw new IllegalArgumentException("AI Service 必须是公开接口");
         }
         T service = invoke(() -> AiServices.create(serviceType, new AiServiceResponseModel(model)));
         // 将整个调用（包括格式生成、反序列化）留在私有加载区，并统一脱敏异常。
@@ -112,6 +112,8 @@ final class DefaultLlmClient implements LlmClient {
     private static IllegalStateException sanitized(RuntimeException exception, UnaryOperator<String> redact) {
         String message = exception.getMessage() == null
                 ? exception.getClass().getSimpleName() : exception.getMessage();
+        if (exception instanceof StructuredOutputException structured)
+            return new StructuredOutputException(structured.kind(), redact.apply(message));
         return new IllegalStateException(redact.apply(message));
     }
 }

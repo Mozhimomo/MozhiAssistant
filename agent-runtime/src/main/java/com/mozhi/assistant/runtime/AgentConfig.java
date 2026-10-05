@@ -15,6 +15,7 @@ final class AgentConfig {
     private static final int MIN_INPUT_BUDGET = 2048;
 
     final LlmConfig llm;
+    final LlmConfig cheapLlm;
     final String summaryThinkingMode;
     final String summaryReasoningEffort;
 
@@ -34,6 +35,7 @@ final class AgentConfig {
 
     private AgentConfig(Properties properties) {
         LlmConfig connection = LlmConfig.from(properties);
+        cheapLlm = LlmConfig.cheapFrom(properties);
         summaryThinkingMode = thinkingMode(properties, "summaryThinkingMode");
         summaryReasoningEffort = reasoningEffort(properties, "summaryReasoningEffort");
         validateThinking("摘要", summaryThinkingMode, summaryReasoningEffort);
@@ -72,7 +74,10 @@ final class AgentConfig {
     static AgentConfig load(String configUrl) throws Exception {
         Properties properties = new Properties();
         URL url = URI.create(configUrl).toURL();
-        try (InputStreamReader reader = new InputStreamReader(url.openStream(), StandardCharsets.UTF_8)) {
+        try (var reader = new java.io.BufferedReader(new InputStreamReader(url.openStream(), StandardCharsets.UTF_8))) {
+            // 接受带或不带 UTF-8 编码标记的配置文件。
+            reader.mark(1);
+            if (reader.read() != '\uFEFF') reader.reset();
             properties.load(reader);
         }
         return new AgentConfig(properties);

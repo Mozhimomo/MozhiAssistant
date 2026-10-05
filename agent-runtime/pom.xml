@@ -6,10 +6,14 @@
     <parent>
         <groupId>com.mozhi</groupId>
         <artifactId>mozhi-assistant-parent</artifactId>
-        <version>0.1.1</version>
+        <version>0.1.4</version>
     </parent>
 
     <artifactId>mozhi-agent-runtime</artifactId>
+
+    <properties>
+        <lombok.version>1.18.48</lombok.version>
+    </properties>
 
     <dependencies>
         <dependency>
@@ -20,7 +24,7 @@
             <systemPath>${starsector.core}/starfarer.api.jar</systemPath>
         </dependency>
 
-        <!-- Game-owned vector types referenced by campaign distance APIs; never shade them. -->
+        <!-- 战役距离 API 引用的向量类型由游戏提供，禁止合并进运行包。 -->
         <dependency>
             <groupId>org.lwjgl.lwjgl</groupId>
             <artifactId>lwjgl_util</artifactId>
@@ -29,7 +33,7 @@
             <systemPath>${starsector.core}/lwjgl_util.jar</systemPath>
         </dependency>
 
-        <!-- The bridge has ONE definition, supplied by the game's bootstrap loader. -->
+        <!-- 桥接接口只能有一个定义，由游戏的引导加载器提供。 -->
         <dependency>
             <groupId>com.mozhi</groupId>
             <artifactId>mozhi-bootstrap</artifactId>
@@ -38,7 +42,7 @@
         </dependency>
 
 
-        <!-- All provider configuration and calls live in the reusable infrastructure module. -->
+        <!-- 所有服务商配置和调用均位于可复用的基础设施模块中。 -->
         <dependency>
             <groupId>com.mozhi</groupId>
             <artifactId>mozhi-llm-client</artifactId>
@@ -48,7 +52,7 @@
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
-            <version>1.18.48</version>
+            <version>${lombok.version}</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>
@@ -56,6 +60,20 @@
     <build>
         <finalName>agent-runtime</finalName>
         <plugins>
+            <!-- 显式注册 Lombok，兼容 JDK 23 及以上不再自动扫描注解处理器的编译行为。 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-antrun-plugin</artifactId>

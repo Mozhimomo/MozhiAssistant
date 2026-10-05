@@ -14,7 +14,7 @@ public final class MozhiModPlugin extends BaseModPlugin {
     public void onGameLoad(boolean newGame) {
         AgentSession.reset();
         FleetAgentHost.reset();
-        // Old saves must resolve the retired class before onGameLoad can remove its entries.
+        // 旧存档必须先解析已停用的类，onGameLoad 才能移除其中的条目。
         for (IntelInfoPlugin oldIntel : new ArrayList<>(
                 Global.getSector().getIntelManager().getIntel(AgentDemoIntel.class))) {
             Global.getSector().getIntelManager().removeIntel(oldIntel);

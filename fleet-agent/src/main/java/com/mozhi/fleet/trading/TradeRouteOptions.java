@@ -25,6 +25,13 @@ public record TradeRouteOptions(int maxStops, double maxDays, double maxStartDis
                 number(p, "reserveFuel", 0), number(p, "reserveSupplies", 0), flag(p, "allowBlackMarket"), flag(p, "closedLoop"),
                 list.stream().map(String.class::cast).toList());
     }
+    public Map<String, Object> parameters() {
+        return Map.ofEntries(Map.entry("maxStops", maxStops), Map.entry("maxDays", maxDays),
+                Map.entry("maxStartDistanceLy", maxStartDistanceLy), Map.entry("maxSpend", maxSpend),
+                Map.entry("minProfit", minProfit), Map.entry("reserveCredits", reserveCredits),
+                Map.entry("reserveFuel", reserveFuel), Map.entry("reserveSupplies", reserveSupplies),
+                Map.entry("allowBlackMarket", allowBlackMarket), Map.entry("closedLoop", closedLoop), Map.entry("commodityIds", commodityIds));
+    }
     private static boolean flag(Map<String, Object> p, String key) {
         Object value = p.getOrDefault(key, key.equals("allowBlackMarket"));
         if (!(value instanceof Boolean flag)) throw new IllegalArgumentException(key + " 必须为布尔值");

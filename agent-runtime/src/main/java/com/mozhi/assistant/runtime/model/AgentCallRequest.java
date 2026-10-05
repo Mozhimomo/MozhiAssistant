@@ -34,6 +34,8 @@ public class AgentCallRequest {
     private List<Object> tools = new ArrayList<>();
 
     private ToolProvider toolProvider;
+    private boolean progressiveTools;
+    private boolean notification;
 
     /** 可选的本轮生成参数覆盖。 */
     private Double temperature;

@@ -1,22 +1,14 @@
 package com.mozhi.assistant.bootstrap.ui;
 
-import com.mozhi.assistant.bridge.FleetAgentAccess;
 import java.awt.*;
 import java.util.Map;
 
-/** 目标、执行摘要和步骤清单；资源及完整诊断可通过交流查询。 */
+/** 目标、执行摘要和可独立滚动的步骤清单；资源由独立状态面板展示。 */
 final class FleetStatusPanel {
     static final Color WARNING = new Color(232, 186, 109);
     private FleetPresentation model = FleetPresentation.from(Map.of());
     private Rectangle bounds = new Rectangle();
-    private long nextPoll;
     private int scroll, contentHeight;
-    boolean update() {
-        long now = System.nanoTime();
-        if (now < nextPoll) return false;
-        nextPoll = now + 500_000_000L;
-        return setModel(FleetPresentation.from(FleetAgentAccess.view()));
-    }
     boolean setModel(FleetPresentation next) {
         if (next.equals(model)) return false;
         if (!next.taskId().equals(model.taskId()) || !next.planId().equals(model.planId())) scroll = 0;
@@ -29,26 +21,28 @@ final class FleetStatusPanel {
         bounds = area;
         ChatFrame.panel(g, area.x, area.y, area.width, area.height, 8, ChatFrame.SURFACE, ChatFrame.BORDER);
         int x = area.x + 18, width = area.width - 36;
-        ChatText.label(g, "舰队计划", ChatText.BODY, ChatText.TEXT, x, area.y + 32);
+        boolean compact = area.height < 380;
+        ChatText.label(g, "目标与执行计划", ChatText.BODY, ChatText.TEXT, x, area.y + 32);
         g.setColor(ChatFrame.BORDER); g.drawLine(x, area.y + 51, x + width, area.y + 51);
         Graphics2D body = (Graphics2D) g.create();
         try {
             body.clipRect(x, area.y + 62, width, Math.max(1, area.height - 74));
             int top = area.y + 62 - scroll, y = top;
-            ChatText.label(body, "目标", ChatText.SMALL, ChatText.MUTED, x, y + 15); y += 27;
-            y += wrapped(body, model.goal(), ChatText.BODY, ChatText.TEXT, x, y, width, 3, 25) + 24;
-            ChatText.label(body, "执行情况", ChatText.SMALL, ChatText.MUTED, x, y + 15); y += 29;
+            if (!compact) { ChatText.label(body, "目标", ChatText.SMALL, ChatText.MUTED, x, y + 15); y += 27; }
+            y += wrapped(body, model.goal(), compact ? ChatText.SMALL : ChatText.BODY, ChatText.TEXT, x, y, width,
+                    Integer.MAX_VALUE, compact ? 20 : 25) + (compact ? 10 : 20);
+            if (!compact) { ChatText.label(body, "执行情况", ChatText.SMALL, ChatText.MUTED, x, y + 15); y += 29; }
             Color statusColor = model.attention() ? WARNING : ChatText.ACCENT;
             ChatText.label(body, model.label(), ChatText.BODY, statusColor, x, y + 18);
             String count = model.steps().isEmpty() ? "" : model.completed() + " / " + model.steps().size();
             float countWidth = (float) ChatText.SMALL.getStringBounds(count, ChatText.METRICS).getWidth();
-            ChatText.label(body, count, ChatText.SMALL, ChatText.MUTED, x + width - countWidth, y + 17); y += 32;
+            ChatText.label(body, count, ChatText.SMALL, ChatText.MUTED, x + width - countWidth, y + 17); y += compact ? 25 : 32;
             if (!model.steps().isEmpty()) {
                 body.setColor(new Color(34, 53, 58)); body.fillRoundRect(x, y, width, 3, 3, 3);
                 body.setColor(statusColor); body.fillRoundRect(x, y, Math.round(width * (float) model.completed() / model.steps().size()), 3, 3, 3); y += 14;
             }
-            y += wrapped(body, model.detail(), ChatText.SMALL, ChatText.MUTED, x, y, width, 3, 21) + 27;
-            ChatText.label(body, "计划清单", ChatText.SMALL, ChatText.MUTED, x, y + 15); y += 30;
+            y += wrapped(body, model.detail(), ChatText.SMALL, ChatText.MUTED, x, y, width, compact ? 1 : 3, 21) + (compact ? 8 : 27);
+            if (!compact) { ChatText.label(body, "计划清单", ChatText.SMALL, ChatText.MUTED, x, y + 15); y += 30; }
             if (model.steps().isEmpty()) y += wrapped(body, model.status().equals("PLANNING") ? "计划制定后会显示在这里" : "暂无待执行步骤", ChatText.SMALL, ChatText.MUTED, x, y, width, 2, 22);
             for (int i = 0; i < model.steps().size(); i++) {
                 var step = model.steps().get(i);

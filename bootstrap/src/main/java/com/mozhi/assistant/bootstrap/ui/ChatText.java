@@ -13,7 +13,7 @@ import java.text.AttributedString;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Shared metrics for painting, wrapping, caret placement and mouse selection. */
+/** 绘制、换行、光标定位和鼠标选择共用的文本度量。 */
 final class ChatText {
     static final Color TEXT = new Color(224, 237, 236);
     static final Color MUTED = new Color(145, 169, 174);

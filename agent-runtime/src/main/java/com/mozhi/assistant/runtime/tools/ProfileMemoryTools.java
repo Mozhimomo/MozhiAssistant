@@ -4,7 +4,7 @@ import com.mozhi.assistant.runtime.ProfileStore;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 
-/** All writes must complete before reporting success; never use model output as a filesystem path. */
+/** 所有写入完成后才能报告成功；禁止将模型输出直接作为文件系统路径。 */
 public final class ProfileMemoryTools {
     private final ProfileStore store;
     private boolean contextInvalidated;

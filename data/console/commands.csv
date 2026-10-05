@@ -1,2 +1,2 @@
 command,class,tags,syntax,help
-MozhiAgent,com.mozhi.assistant.bootstrap.MozhiAgentCommand,"mozhi,agent,campaign",MozhiAgent [chat|test [message]|status|reset],"Run in the campaign map. chat: open the chat UI after closing the console. No arguments or test: run the default tool demo. test <message>: send a prompt. status: show progress and diagnostics. reset: clear memory and reload configuration on next message. Ctrl+Shift+M also opens the chat UI on the campaign map."
+MozhiAgent,com.mozhi.assistant.bootstrap.MozhiAgentCommand,"mozhi,agent,campaign",MozhiAgent [chat|test [消息]|status|reset],"在战役地图中使用。chat：关闭控制台后打开聊天界面。不带参数或输入 test：运行默认工具演示。test <消息>：发送提示词。status：显示进度与诊断信息。reset：清空会话记忆，下次发送消息时重新加载配置。在战役地图中也可按 Ctrl+Shift+M 打开聊天界面。"

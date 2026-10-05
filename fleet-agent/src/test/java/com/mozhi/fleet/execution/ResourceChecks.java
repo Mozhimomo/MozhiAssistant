@@ -1,41 +1,30 @@
 package com.mozhi.fleet.execution;
 
 import com.mozhi.fleet.model.*;
-import java.util.List;
 import java.util.Map;
 
 public final class ResourceChecks {
     public static void main(String[] args) {
         Monitor monitor = new Monitor();
         var exact = new FleetResources(30, 30, 2, 60, 2, 10, 10);
-        check(monitor.checkResources(exact).status() == ResourceCheck.Status.READY, "Exact 15 LY, 30 days and minimum crew are sufficient");
+        check(monitor.checkResources(exact).status() == ResourceCheck.Status.READY, "正好满足 15 光年、30 天与最低船员时不产生建议");
         var low = monitor.checkResources(new FleetResources(29.25, 40, 2, 58.1, 2, 8, 10));
-        check(low.status() == ResourceCheck.Status.REPLAN && low.purchases().equals(Map.of("fuel", 11, "supplies", 32, "crew", 4)), "Purchases cover recovery targets, not warning thresholds");
-        check(low.targets().equals(Map.of("fuel", 40d, "supplies", 90d, "crew", 12d)), "Targets retain real headroom");
-        var partial = monitor.checkResources(new FleetResources(30, 40, 2, 60, 2, 10, 10), low.targets());
-        check(partial.status() == ResourceCheck.Status.REPLAN && partial.purchases().equals(Map.of("fuel", 10, "supplies", 30, "crew", 2)), "Crossing trigger thresholds does not finish an active refill");
-        var filled = monitor.checkResources(new FleetResources(40, 40, 2, 90, 2, 12, 10), partial.targets());
-        check(filled.status() == ResourceCheck.Status.READY && filled.targets().isEmpty(), "Clear each target after reaching it");
-        check(monitor.checkResources(new FleetResources(39, 40, 2, 88, 2, 11, 10), filled.targets()).status() == ResourceCheck.Status.READY,
-                "Consumption after refill does not immediately retrigger a warning");
+        check(low.status() == ResourceCheck.Status.ADVISORY && low.issues().equals(java.util.Set.of("fuel", "supplies", "crew")), "短缺只报告建议事项，不规定采购数量");
+        check(low.reason().contains("不是执行限制") && low.reason().contains("KEEP"), "建议明确交由轻量模型决定");
+        var partial = monitor.checkResources(new FleetResources(30, 40, 2, 60, 2, 10, 10));
+        check(partial.status() == ResourceCheck.Status.READY && partial.issues().isEmpty(), "当前阈值观测不强制规定补充目标");
         var impossible = monitor.checkResources(new FleetResources(29, 29, 2, 60, 2, 10, 10));
-        check(impossible.status() == ResourceCheck.Status.BLOCKED && impossible.reason().contains("油船") && impossible.reason().contains("15"), "Tank capacity has priority over repeated refueling");
-        check(monitor.checkResources(new FleetResources(0, 0, 0, 0, 0, 0, 0)).status() == ResourceCheck.Status.READY, "Zero consumption does not divide by zero");
-        check(monitor.checkResources(new FleetResources(30, 30, 2.00000001, 60, 2, 10, 10)).status() == ResourceCheck.Status.READY, "Ignore tiny float rounding around capacity threshold");
+        check(impossible.status() == ResourceCheck.Status.ADVISORY && impossible.issues().contains("fuelCapacity") && impossible.reason().contains("油船"), "油箱容量不足只作建议，不强制阻塞");
+        check(monitor.checkResources(new FleetResources(0, 0, 0, 0, 0, 0, 0)).status() == ResourceCheck.Status.READY, "零消耗时不发生除零");
+        check(monitor.checkResources(new FleetResources(30, 30, 2.00000001, 60, 2, 10, 10)).status() == ResourceCheck.Status.READY, "忽略容量阈值附近的微小浮点误差");
         Step work = Step.create("WORK", Map.of(), "工作", "完成");
         var review = monitor.check(new ExecutionResult(work, ExecutionResult.Status.SUCCEEDED, "完成"), low.snapshot());
-        check(review.decision() == Monitor.Decision.ADVANCE && review.resources().status() == ResourceCheck.Status.REPLAN, "Success remains recorded even when resources trigger a replan");
-        Step move = Step.create("MOVE_TO", Map.of("destinationId", "market"), "移动", "到场");
-        Plan purchase = Plan.create("补购", List.of(move, buy("fuel", 11), buy("supplies", 32), buy("crew", 4), work));
-        check(monitor.coversResupply(purchase, 0, low, true), "Resupply prefix covers all deficits before business");
-        check(!monitor.coversResupply(Plan.create("只到警戒线", List.of(buy("fuel", 1), buy("supplies", 2), buy("crew", 2))), 0, low, true), "Reject quantities that only reach warning thresholds");
-        check(!monitor.coversResupply(Plan.create("缺项", List.of(buy("fuel", 1))), 0, low, true), "Missing commodities are rejected");
-        check(!monitor.coversResupply(Plan.create("顺序错误", List.of(work, buy("fuel", 1), buy("supplies", 2), buy("crew", 2))), 0, low, true), "Business before recovery is rejected");
-        check(!monitor.coversResupply(purchase, 2, low, false), "Consumed purchase cannot cover a still-existing shortage");
-        try { new FleetResources(Double.NaN, 1, 1, 1, 1, 1, 1); throw new AssertionError("Invalid snapshot accepted"); }
+        check(review.decision() == Monitor.Decision.ADVANCE && review.resources().status() == ResourceCheck.Status.ADVISORY, "资源触发重规划时仍保留成功记录");
+        check(monitor.checkResources(new FleetResources(29, 30, 2, 60, 2, 10, 10)).status() == ResourceCheck.Status.ADVISORY,
+                "正好支持 15 光年的油箱仍可加油");
+        try { new FleetResources(Double.NaN, 1, 1, 1, 1, 1, 1); throw new AssertionError("错误地接受了无效快照"); }
         catch (IllegalArgumentException expected) { }
-        System.out.println("Resource monitor checks passed");
+        System.out.println("资源监视器检查通过");
     }
-    private static Step buy(String id, int quantity) { return Step.create("BUY", Map.of("itemType", "COMMODITY", "itemId", id, "quantity", quantity), "补购", "补足"); }
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
 }

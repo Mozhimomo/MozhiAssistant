@@ -1,7 +1,7 @@
-# 使用 UTF-8 保存。发行包的 agent.properties 由此模板生成；填写服务地址、模型和密钥后使用。
+﻿# 使用 UTF-8 保存。发行包的 agent.properties 由此模板生成；填写服务地址、模型和密钥后使用。
 # apiKey 直接填写真实密钥；或写成 ${MOZHI_API_KEY} 读取指定环境变量。
-baseUrl=https://api.openai.com/v1/
-modelName=YOUR_TOOL_CAPABLE_MODEL
+baseUrl=https://api.deepseek.com/v1/
+modelName=deepseek-flash
 apiKey=
 timeoutSeconds=60
 
@@ -17,7 +17,7 @@ seed=
 maxRetries=0
 memoryMaxMessages=64
 maxSequentialToolsInvocations=4
-systemPrompt=你是游戏《远行星号》中的墨汁智能体。简短地用中文回答。涉及玩家舰队时必须调用 getFleetSummary 实时读取最新详情，不要凭记忆猜测。涉及整数加法时必须调用 add 工具。调用完工具后向用户解释结果。
+systemPrompt=你是游戏《远行星号》中的墨汁智能体。简短地用中文回答。涉及玩家舰队时实时读取最新详情，不要凭记忆猜测。按当前工具框架提供的功能和参数获取信息、执行操作，并向用户解释真实结果。
 
 # ReAct 上下文窗口：按序列化 UTF-8 字节保守估算 token，包含工具定义和用户画像。
 contextWindowTokens=262144
@@ -40,7 +40,7 @@ streamingEnabled=true
 # 普通聊天和工具调用不因此强制改为 JSON 输出。
 structuredOutputMode=prompt
 
-# 舰队 Agent 默认每 15 秒（不含暂停时间）异步重新规划，失败时也会触发。
+# 舰队 Agent 每 15 秒（不含暂停时间）由轻量模型检查是否需要重规划；需要时升级主模型，失败直接触发主模型。
 # Monitor 只检查执行结果；旧版 fleetReview* / fleetStallDays / fleetMaxReplans 已不使用。
 # 舰队规划器可独立覆盖聊天的输出与思考配置；省略键时继承聊天配置。
 # 输出预算包含思考和计划正文；思考参数默认继承聊天配置。
@@ -56,3 +56,11 @@ thinkingMode=
 reasoningEffort=
 summaryThinkingMode=
 summaryReasoningEffort=
+
+# 轻量模型：周期重规划检查、对话摘要和主动通知。留空项继承主模型。
+# 主模型负责对话、完整规划和最终目标验收；当前两路默认同用 deepseek-flash。
+cheapModelName=deepseek-flash
+cheapBaseUrl=
+cheapApiKey=
+# 可独立填写 cheapMaxTokens/cheapMaxCompletionTokens（只能一个）、cheapThinkingMode、cheapReasoningEffort。
+# 不填写时沿用主模型生成参数。

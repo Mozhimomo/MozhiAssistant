@@ -12,11 +12,18 @@ final class PlannerConfig {
     private PlannerConfig() {}
 
     static LlmConfig load(String url) throws IOException {
+        return load(url, false);
+    }
+
+    static LlmConfig load(String url, boolean cheap) throws IOException {
         Properties values = new Properties();
-        try (var reader = new InputStreamReader(URI.create(url).toURL().openStream(), StandardCharsets.UTF_8)) {
+        try (var reader = new java.io.BufferedReader(new InputStreamReader(URI.create(url).toURL().openStream(), StandardCharsets.UTF_8))) {
+            // 接受带或不带 UTF-8 编码标记的配置文件。
+            reader.mark(1);
+            if (reader.read() != '\uFEFF') reader.reset();
             values.load(reader);
         }
-        return from(values);
+        return cheap ? LlmConfig.cheapFrom(values) : from(values);
     }
 
     static LlmConfig from(Properties values) {
@@ -28,5 +35,11 @@ final class PlannerConfig {
         return base.withGeneration(tokens,
                 values.getProperty("fleetPlannerThinkingMode", base.thinkingMode()),
                 values.getProperty("fleetPlannerReasoningEffort", base.reasoningEffort()));
+    }
+    /** 仅供一次截断恢复使用；保持模型、密钥与输出上限，避免高强度思考再次占满生成预算。 */
+    static LlmConfig recovery(LlmConfig base) {
+        boolean thinking = "enabled".equals(base.thinkingMode());
+        return base.withGeneration(base.outputTokens(), thinking ? "disabled" : base.thinkingMode(),
+                thinking || "disabled".equals(base.thinkingMode()) ? null : base.reasoningEffort() == null ? null : "low");
     }
 }

@@ -4,14 +4,14 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.mozhi</groupId>
     <artifactId>mozhi-assistant-parent</artifactId>
-    <version>0.1.1</version>
+    <version>0.1.4</version>
     <packaging>pom</packaging>
     <modules><module>llm-client</module><module>bootstrap</module><module>fleet-agent</module><module>agent-runtime</module></modules>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>17</maven.compiler.release>
         <maven.compiler.parameters>true</maven.compiler.parameters>
-        <!-- Set true while the game holds installed JARs open; build outputs remain in target/. -->
+        <!-- 游戏占用已安装的 JAR 时设为 true；构建产物仍输出至 target/。 -->
         <mozhi.skipDeployment>false</mozhi.skipDeployment>
         <langchain4j.version>1.15.0</langchain4j.version>
         <starsector.core>${maven.multiModuleProjectDirectory}/../../starsector-core</starsector.core>

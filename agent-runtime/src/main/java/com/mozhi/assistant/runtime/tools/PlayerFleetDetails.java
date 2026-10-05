@@ -9,7 +9,7 @@ import java.util.List;
 import static com.mozhi.assistant.runtime.tools.ShipDetails.captain;
 import static com.mozhi.assistant.runtime.tools.ShipDetails.number;
 
-/** Invoked by the tool on the main thread. Reads Global each time; no cached fleet state. */
+/** 由工具在主线程调用；每次读取 Global，不缓存舰队状态。 */
 final class PlayerFleetDetails {
     private PlayerFleetDetails() { }
 

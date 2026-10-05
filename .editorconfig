@@ -1,5 +1,5 @@
-[*.properties]
-charset = utf-8
+root = true
 
-[*.properties.example]
+# 配置文件使用 UTF-8；IDEA 的属性文件默认编码也需设为 UTF-8。
+[*.properties{,.example}]
 charset = utf-8

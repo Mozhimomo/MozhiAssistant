@@ -2,19 +2,19 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <!-- Independently buildable: no game paths, agent module or parent POM required. -->
+    <!-- 可独立构建：不需要游戏路径、智能体模块或父级 POM。 -->
     <groupId>com.mozhi</groupId>
     <artifactId>mozhi-llm-client</artifactId>
-    <version>0.1.1</version>
-    <name>Mozhi LLM Client</name>
-    <description>Reusable synchronous and streaming OpenAI-compatible LLM client for Java 17.</description>
+    <version>0.1.4</version>
+    <name>墨汁大模型客户端</name>
+    <description>适用于 Java 17 的可复用大模型客户端，兼容 OpenAI 接口，支持同步和流式调用。</description>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>17</maven.compiler.release>
         <langchain4j.version>1.15.0</langchain4j.version>
     </properties>
     <dependencies>
-        <!-- Tool schemas/execution interfaces used by clients share one LangChain4j runtime. -->
+        <!-- 客户端使用的工具结构与执行接口共用同一套 LangChain4j 运行环境。 -->
         <dependency>
             <groupId>dev.langchain4j</groupId><artifactId>langchain4j</artifactId>
             <version>${langchain4j.version}</version>

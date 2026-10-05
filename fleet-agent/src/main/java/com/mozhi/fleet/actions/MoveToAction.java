@@ -3,19 +3,12 @@ package com.mozhi.fleet.actions;
 import com.fs.starfarer.api.campaign.FleetAssignment;
 import com.mozhi.fleet.model.ExecutionResult;
 import com.mozhi.fleet.model.Step;
-import com.mozhi.fleet.planning.ActionSpec;
-import java.util.List;
 import static com.mozhi.fleet.model.ExecutionResult.Status.*;
 
 public final class MoveToAction implements Action {
-    private static final ActionSpec SPEC = new ActionSpec("MOVE_TO",
-            "移动到实体、市场或星系中心，并在实际进入目标环绕轨道后成功；只下达移动/环绕指令不算完成。",
-            List.of(ActionSupport.parameter("destinationId", ActionSpec.Type.STRING, true, "观察中存在的实体、市场或星系 ID")));
-
-    @Override public ActionSpec spec() { return SPEC; }
-
-    @Override public ExecutionResult execute(Step step, ActionContext context) {
-        var target = ActionSupport.destination(context, ActionSupport.text(step, "destinationId"));
+    @dev.langchain4j.agent.tool.Tool(name = "MOVE_TO", value = "移动到实体、市场或星系中心，实际进入目标环绕轨道后成功；只下达移动指令不算完成。")
+    public ExecutionResult moveTo(Step step, ActionContext context, @dev.langchain4j.agent.tool.P(name = "destinationId", value = "观察中存在的实体、市场或星系 ID") String destinationId) {
+        var target = ActionSupport.destination(context, destinationId);
         if (target == context.fleet()) throw new IllegalArgumentException("不能以自身为移动目标");
         if (target.getContainingLocation() == null) throw new IllegalStateException("目的地已离开星区");
         if (ActionSupport.orbiting(context.fleet(), target)) return ActionSupport.result(step, SUCCEEDED, "已抵达并环绕 " + target.getName());

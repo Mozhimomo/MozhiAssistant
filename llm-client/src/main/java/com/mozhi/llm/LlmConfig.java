@@ -67,10 +67,36 @@ public final class LlmConfig {
         return new LlmConfig(java.util.Objects.requireNonNull(properties, "properties"));
     }
 
+    /** 轻量模型独立路由；未填写的 cheapX 配置继承主模型，不复制密钥到配置文件。 */
+    public static LlmConfig cheapFrom(Properties properties) {
+        if (!properties.getProperty("cheapMaxTokens", "").isBlank() && !properties.getProperty("cheapMaxCompletionTokens", "").isBlank())
+            throw new IllegalArgumentException("cheapMaxTokens 和 cheapMaxCompletionTokens 只能填写一个");
+        Properties copy = new Properties();
+        copy.putAll(properties);
+        for (String key : ListKeys.CHEAP) {
+            String value = properties.getProperty("cheap" + Character.toUpperCase(key.charAt(0)) + key.substring(1), "").trim();
+            if (!value.isEmpty()) {
+                if (key.equals("maxTokens")) copy.remove("maxCompletionTokens");
+                if (key.equals("maxCompletionTokens")) copy.remove("maxTokens");
+                copy.setProperty(key, value);
+            }
+        }
+        return from(copy);
+    }
+
+    private static final class ListKeys {
+        static final String[] CHEAP = {"apiKey", "baseUrl", "modelName", "timeoutSeconds", "maxRetries",
+                "streamingEnabled", "temperature", "topP", "maxTokens", "maxCompletionTokens",
+                "thinkingMode", "reasoningEffort", "structuredOutputMode"};
+    }
+
     public static LlmConfig load(String configUrl) throws java.io.IOException {
         Properties properties = new Properties();
-        try (InputStreamReader reader = new InputStreamReader(
-                URI.create(configUrl).toURL().openStream(), StandardCharsets.UTF_8)) {
+        try (var reader = new java.io.BufferedReader(new InputStreamReader(
+                URI.create(configUrl).toURL().openStream(), StandardCharsets.UTF_8))) {
+            // 兼容编辑器添加的 UTF-8 编码标记，避免标记被当成首个配置键的一部分。
+            reader.mark(1);
+            if (reader.read() != '\uFEFF') reader.reset();
             properties.load(reader);
         }
         return from(properties);

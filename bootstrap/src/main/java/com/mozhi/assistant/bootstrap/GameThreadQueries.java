@@ -8,7 +8,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
-/** Queues code, not precomputed game data. Polled by the campaign script and chat dialog. */
+/** 排队保存待执行代码，不提前采集游戏数据；由战役脚本和聊天对话框轮询。 */
 final class GameThreadQueries implements GameThreadAccess {
     private final Thread owner = Thread.currentThread();
     private final ConcurrentLinkedQueue<Query> requests = new ConcurrentLinkedQueue<>();

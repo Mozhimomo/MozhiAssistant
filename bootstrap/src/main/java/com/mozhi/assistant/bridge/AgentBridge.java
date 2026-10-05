@@ -1,6 +1,6 @@
 package com.mozhi.assistant.bridge;
 
-/** The only API crossing the loader boundary. No framework or reflection types here. */
+/** 唯一跨越类加载器边界的接口，不包含框架或反射类型。 */
 public interface AgentBridge {
     void initialize(String configUrl, GameThreadAccess gameThread) throws Exception;
     String chat(String message);

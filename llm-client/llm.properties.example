@@ -1,4 +1,4 @@
-# UTF-8；没有任何游戏或 agent 专用配置。复制后填写自己的端点、模型和密钥。
+﻿# UTF-8；没有任何游戏或 agent 专用配置。复制后填写自己的端点、模型和密钥。
 baseUrl=https://api.openai.com/v1/
 modelName=YOUR_TOOL_CAPABLE_MODEL
 apiKey=${MOZHI_API_KEY}

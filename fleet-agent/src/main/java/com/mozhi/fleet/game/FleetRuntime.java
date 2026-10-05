@@ -88,9 +88,9 @@ public final class FleetRuntime implements FleetAgentBridge {
 
     private String observations() {
         if (agent.merged()) return encode(Map.of("controlledFleetState", "MERGED", "playerFleet", GameWorld.fleet(sector.getPlayerFleet()),
-                "mergeResult", agent.view().lastResult().result(), "tradeReceipts", tradeReceipts()));
-        var observation = new LinkedHashMap<String, Object>(GameWorld.observations(sector, controlled(), agent.view().goal(), agent.view().plan(), agent.resourceCheck()));
-        observation.put("tradeReceipts", tradeReceipts());
+                "mergeResult", agent.view().lastResult().result(), "tradeSummary", agent.tradeSummary()));
+        var observation = new LinkedHashMap<String, Object>(GameWorld.observations(sector, controlled(), agent.view().goal(), agent.remainingPlan(), agent.resourceCheck()));
+        observation.put("tradeSummary", agent.tradeSummary());
         observation.put("returnAfterCompletion", agent.returnAfterCompletion());
         observation.put("returning", agent.returning());
         return encode(observation);
@@ -116,9 +116,25 @@ public final class FleetRuntime implements FleetAgentBridge {
             if (closed) throw new IllegalStateException("舰队运行时已关闭");
             JsonNode request = json.readTree(requestJson);
             String operation = text(request, "operation");
-            if (operation.equals("status")) return encode(view());
+            if (operation.equals("status")) return encode(summaryView());
+            if (operation.equals("tradeReceipts")) {
+                var current = agent != null ? agent.view() : detachedState == null ? null : detachedState.view();
+                return encode(FleetQueries.receipts(current == null ? "" : current.taskId(), text(request, "taskId"),
+                        tradeReceipts(), integer(request, "offset"), integer(request, "limit")));
+            }
             if (operation.equals("preview")) return encode(FleetDeployment.preview(sector.getPlayerFleet(), ships(request)));
             if (!problem.isBlank() && problem.startsWith("资产")) throw new IllegalStateException(problem);
+            if (operation.equals("transferToPlayer") || operation.equals("transferToMozhi")) {
+                CampaignFleetAPI fleet = controlled();
+                CampaignFleetAPI player = Objects.requireNonNull(sector.getPlayerFleet(), "玩家舰队不存在");
+                if (!request.path("amount").isNumber()) throw new IllegalArgumentException("必须明确提供转账金额数值");
+                float credits = request.path("amount").floatValue();
+                boolean toPlayer = operation.equals("transferToPlayer");
+                CreditTransfer.transfer((toPlayer ? fleet : player).getCargo(), (toPlayer ? player : fleet).getCargo(), credits);
+                // 即时转账不替换任务，不写入交易账本，不触发重新规划。
+                return encode(Map.of("status", "SUCCEEDED", "operation", operation, "amount", credits,
+                        "from", toPlayer ? "mozhi" : "player", "to", toPlayer ? "player" : "mozhi"));
+            }
             if (operation.equals("dispatch")) {
                 if (GameWorld.find(sector, fleetId) != null) throw new IllegalStateException("已有分舰队，请先召回");
                 List<String> ships = ships(request);
@@ -133,6 +149,14 @@ public final class FleetRuntime implements FleetAgentBridge {
                 controlled();
                 switch (operation) {
                     case "recall" -> agent.recall();
+                    case "follow" -> {
+                        var target = GameWorld.followTarget(sector, text(request, "targetFleet"));
+                        if (target == controlled()) throw new IllegalArgumentException("分舰队不能跟随自身");
+                        if (target.isEmpty() || target.getContainingLocation() == null) throw new IllegalArgumentException("跟随目标舰队不可用");
+                        String id = target == sector.getPlayerFleet() ? "player" : target.getId();
+                        agent.start(Plan.create("持续跟随 " + target.getName() + "，直到玩家停止或改变指令；靠近不算任务结束，不合并资产",
+                                List.of(Step.create("FOLLOW_FLEET", Map.of("targetFleetId", id), "持续跟随 " + target.getName(), "持续保持跟随，等待玩家新指令"))));
+                    }
                     case "move" -> {
                         String destination = text(request, "destination");
                         var target = GameWorld.destination(sector, destination);
@@ -159,7 +183,7 @@ public final class FleetRuntime implements FleetAgentBridge {
                 problem = "";
             }
             save();
-            return encode(view());
+            return encode(summaryView());
         } catch (UncertainActionException error) {
             problem = "资产划拨恢复无法确认，已阻止新命令：" + error.getMessage();
             save();
@@ -207,12 +231,18 @@ public final class FleetRuntime implements FleetAgentBridge {
         }
     }
 
+    private Map<String, Object> summaryView() {
+        return FleetQueries.summary(view(), agent != null ? agent.tradeSummary()
+                : com.mozhi.fleet.model.TradeSummary.of(detachedState == null ? List.of() : detachedState.execution().terminal()));
+    }
+
     @Override public Map<String, Object> view() {
         requireOwner();
         var result = new LinkedHashMap<String, Object>();
         var fleet = GameWorld.find(sector, fleetId);
         if (fleet != null) result.putAll(GameWorld.fleet(fleet));
         var state = new LinkedHashMap<String, Object>();
+        state.put("usageStatistics", com.mozhi.llm.UsageMetrics.snapshot());
         var receipts = tradeReceipts();
         state.put("tradeReceipts", receipts);
         state.put("fleetId", fleetId); state.put("mode", mode); state.put("reason", problem);

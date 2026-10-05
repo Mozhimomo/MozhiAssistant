@@ -10,7 +10,7 @@ import example.ChatBridge;
 import java.util.Properties;
 import java.util.function.Consumer;
 
-/** 该实现由私有加载器加载；无 game API 依赖，可直接用于自己的 Mod。 */
+/** 该实现由私有加载器加载；不依赖游戏 API，可直接用于自己的模组。 */
 public final class ChatEntry implements ChatBridge {
     private LlmClient client;
 

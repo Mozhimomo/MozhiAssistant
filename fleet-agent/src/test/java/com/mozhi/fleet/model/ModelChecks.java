@@ -14,7 +14,7 @@ public final class ModelChecks {
         invalidDefinitions();
         jsonRoundTrip();
         generatedPlans();
-        System.out.println("Plan / Step checks passed");
+        System.out.println("Plan 与 Step 检查通过");
     }
 
     private static void immutableParameters() {
@@ -31,8 +31,8 @@ public final class ModelChecks {
         items.clear();
         parameters.clear();
         List<?> saved = (List<?>) step.parameters().get("items");
-        check(saved.size() == 2 && saved.get(1) == null, "Preserve nested values and JSON null");
-        check(((Map<?, ?>) saved.get(0)).get("quantity").equals(100), "Snapshot nested parameters");
+        check(saved.size() == 2 && saved.get(1) == null, "保留嵌套值与 JSON 空值");
+        check(((Map<?, ?>) saved.get(0)).get("quantity").equals(100), "对嵌套参数建立快照");
         rejects(UnsupportedOperationException.class, () -> step.parameters().put("new", true));
         rejects(UnsupportedOperationException.class, saved::clear);
         rejects(UnsupportedOperationException.class, () -> ((Map<?, ?>) saved.get(0)).clear());
@@ -44,13 +44,13 @@ public final class ModelChecks {
         List<Step> source = new ArrayList<>(List.of(travel, buy));
         Plan original = Plan.create("采购补给", source);
         source.clear();
-        check(original.steps().equals(List.of(travel, buy)), "Preserve step order and isolate source list");
+        check(original.steps().equals(List.of(travel, buy)), "保留步骤顺序并隔离原始列表");
         rejects(UnsupportedOperationException.class, () -> original.steps().clear());
 
         Plan remaining = Plan.create(original.goal(), List.of(buy));
-        check(!original.id().equals(remaining.id()), "New plan has a new identity");
-        check(remaining.steps().get(0).id().equals(buy.id()), "Replan can retain unchanged step identity");
-        check(original.steps().size() == 2, "Replacement does not mutate the original plan");
+        check(!original.id().equals(remaining.id()), "新计划具有新的身份");
+        check(remaining.steps().get(0).id().equals(buy.id()), "重规划可保留未变步骤的身份");
+        check(original.steps().size() == 2, "替换计划不修改原始计划");
     }
 
     private static void invalidDefinitions() {
@@ -86,7 +86,7 @@ public final class ModelChecks {
                 """;
         Plan decoded = mapper.readValue(data, Plan.class);
         Plan restored = mapper.readValue(mapper.writeValueAsString(decoded), Plan.class);
-        check(decoded.equals(restored), "JSON round-trip preserves plan definition and IDs");
+        check(decoded.equals(restored), "JSON 序列化往返保留计划定义与 ID");
         rejects(UnsupportedOperationException.class, () -> restored.steps().clear());
         rejects(UnsupportedOperationException.class, () -> restored.steps().get(0).parameters().clear());
         String invalid = data.replace("\"action\":\"BUY\"", "\"action\":\"\"");
@@ -101,17 +101,17 @@ public final class ModelChecks {
         Plan original = Plan.create("跑商后回归", List.of(calc, tail));
         Plan child = Plan.create("计算路线", List.of(trade));
         Plan expanded = original.insertAfter(0, child);
-        check(expanded.steps().equals(List.of(calc, trade, tail)), "Insert immediately after decision, before original suffix");
-        check(expanded.goal().equals(original.goal()) && !expanded.id().equals(original.id()), "Keep goal and renew plan identity");
-        check(original.steps().equals(List.of(calc, tail)), "Original snapshot remains immutable");
+        check(expanded.steps().equals(List.of(calc, trade, tail)), "插入位置紧随决策步骤，位于原后续步骤之前");
+        check(expanded.goal().equals(original.goal()) && !expanded.id().equals(original.id()), "保留目标并更新计划身份");
+        check(original.steps().equals(List.of(calc, tail)), "原始快照保持不可变");
         rejects(IllegalArgumentException.class, () -> original.insertAfter(0, Plan.create("collision", List.of(tail))));
         rejects(IllegalArgumentException.class, () -> original.insertAfter(-1, child));
         rejects(IllegalArgumentException.class, () -> original.insertAfter(2, child));
         ObjectMapper json = new ObjectMapper();
         ExecutionResult result = new ExecutionResult(calc, ExecutionResult.Status.SUCCEEDED, "计算成功", child);
-        check(json.readValue(json.writeValueAsString(result), ExecutionResult.class).equals(result), "Generated plan survives JSON round trip");
+        check(json.readValue(json.writeValueAsString(result), ExecutionResult.class).equals(result), "生成计划可通过 JSON 序列化往返保存");
         var legacy = json.valueToTree(result); ((com.fasterxml.jackson.databind.node.ObjectNode) legacy).remove("generatedPlan");
-        check(json.treeToValue(legacy, ExecutionResult.class).generatedPlan() == null, "Old saves without generatedPlan remain readable");
+        check(json.treeToValue(legacy, ExecutionResult.class).generatedPlan() == null, "缺少 generatedPlan 的旧存档仍可读取");
         for (var status : List.of(ExecutionResult.Status.RUNNING, ExecutionResult.Status.WAITING, ExecutionResult.Status.FAILED))
             rejects(IllegalArgumentException.class, () -> new ExecutionResult(calc, status, "invalid", child));
     }

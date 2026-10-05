@@ -2,13 +2,13 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
  <modelVersion>4.0.0</modelVersion>
- <parent><groupId>com.mozhi</groupId><artifactId>mozhi-assistant-parent</artifactId><version>0.1.1</version></parent>
+ <parent><groupId>com.mozhi</groupId><artifactId>mozhi-assistant-parent</artifactId><version>0.1.4</version></parent>
  <artifactId>mozhi-fleet-agent</artifactId>
  <dependencies>
   <dependency><groupId>com.mozhi</groupId><artifactId>mozhi-llm-client</artifactId><version>${project.version}</version></dependency>
   <dependency><groupId>com.mozhi</groupId><artifactId>mozhi-bootstrap</artifactId><version>${project.version}</version><scope>provided</scope></dependency>
   <dependency><groupId>com.fs.starfarer</groupId><artifactId>starfarer-api</artifactId><version>0.98a-RC5</version><scope>system</scope><systemPath>${starsector.core}/starfarer.api.jar</systemPath></dependency>
-  <!-- CargoAPI does not expose fractional commodity accounting; read CargoData's public accessor. -->
+  <!-- CargoAPI 未提供商品小数记账接口，因此读取 CargoData 的公开访问方法。 -->
   <dependency><groupId>com.fs.starfarer</groupId><artifactId>starfarer-core</artifactId><version>0.98a-RC5</version><scope>system</scope><systemPath>${starsector.core}/starfarer_obf.jar</systemPath></dependency>
   <dependency><groupId>com.fs.starfarer</groupId><artifactId>fs-common</artifactId><version>0.98a-RC5</version><scope>system</scope><systemPath>${starsector.core}/fs.common_obf.jar</systemPath></dependency>
   <dependency><groupId>org.lwjgl.lwjgl</groupId><artifactId>lwjgl_util</artifactId><version>2.9.3</version><scope>system</scope><systemPath>${starsector.core}/lwjgl_util.jar</systemPath></dependency>

@@ -32,13 +32,18 @@ public final class ToolRegistry {
 
         /** 执行和记录使用同一个上下文；失败也形成可回传模型的工具结果。 */
         ToolExecution execute(ToolExecutionRequest call, InvocationContext invocationContext) {
+            return execute(call, invocationContext, null);
+        }
+
+        /** 未披露的工具返回加载指引，仍不执行其业务方法。 */
+        ToolExecution execute(ToolExecutionRequest call, InvocationContext invocationContext, String unavailableHint) {
             Objects.requireNonNull(invocationContext, "invocationContext");
             LocalDateTime startedAt = LocalDateTime.now();
             ToolExecutionResult result;
             try {
                 ToolExecutor executor = executors.get(call.name());
                 if (executor == null) {
-                    throw new IllegalArgumentException("未找到工具：" + call.name());
+                    throw new IllegalArgumentException(unavailableHint == null ? "未找到工具：" + call.name() : unavailableHint);
                 }
                 result = Objects.requireNonNull(
                         executor.executeWithContext(call, invocationContext),

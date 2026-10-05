@@ -3,7 +3,6 @@ package com.mozhi.fleet.game;
 import com.mozhi.fleet.actions.ActionContext;
 import com.mozhi.fleet.actions.CommodityPricing;
 import com.mozhi.fleet.model.ResourceCheck;
-import com.mozhi.fleet.execution.Monitor;
 import com.mozhi.fleet.trading.TradeSnapshot;
 import com.mozhi.fleet.trading.TradeSnapshotCollector;
 import java.util.*;
@@ -39,16 +38,6 @@ public final class ResourceMarkets {
                             if (shop.getPlugin().isIllegalOnSubmarket(id, PLAYER_BUY)) continue;
                             float available = cargo.getCommodityQuantity(id);
                             if (!Float.isFinite(available) || available < 1) continue;
-                            double targetAmount = check.targets().getOrDefault(id, switch (id) {
-                                case "fuel" -> r.fuelCapacity();
-                                case "supplies" -> Monitor.REFILL_SUPPLY_DAYS * r.suppliesPerDay();
-                                default -> Math.max(r.minimumCrew() + 1, Math.ceil(r.minimumCrew() * Monitor.CREW_BUFFER));
-                            });
-                            double wanted = switch (id) {
-                                case "fuel" -> targetAmount - r.fuel() + fuel;
-                                case "supplies" -> targetAmount - r.supplies() + supplies;
-                                default -> targetAmount - r.crew();
-                            };
                             double room = switch (id) {
                                 case "fuel" -> fleet.fuelRoom() + fuel;
                                 case "crew" -> fleet.personnelRoom();
@@ -58,16 +47,13 @@ public final class ResourceMarkets {
                                     yield (fleet.cargoRoom() + supplies * space) / space;
                                 }
                             };
-                            int quantity = (int) Math.min(1_000_000, Math.min(Math.floor(available), Math.min(Math.floor(room), Math.ceil(Math.max(0, wanted)))));
+                            // 样例整批报价仅展示价格，不是建议或最低采购量。
+                            int quantity = (int) Math.min(100, Math.min(Math.floor(available), Math.floor(room)));
                             if (quantity <= 0) continue;
-                            int minimumNeeded = (int) Math.ceil(Math.max(0, wanted));
-                            int minimumQuoted = Math.min(quantity, minimumNeeded);
-                            goods.add(Map.of("itemId", id, "available", available, "quotedQuantity", quantity,
-                                    "totalPrice", CommodityPricing.quote(market, shop, id, quantity, true),
-                                    "targetNeededOnArrival", minimumNeeded, "targetQuotedQuantity", minimumQuoted,
-                                    "targetTotalPrice", minimumQuoted == 0 ? 0 : CommodityPricing.quote(market, shop, id, minimumQuoted, true)));
+                            goods.add(Map.of("itemId", id, "available", available, "capacityOnArrival", Math.floor(room),
+                                    "sampleQuantity", quantity, "sampleTotalPrice", CommodityPricing.quote(market, shop, id, quantity, true)));
                         }
-                        if (goods.stream().noneMatch(good -> check.purchases().containsKey(good.get("itemId")))) continue;
+                        if (goods.isEmpty()) continue;
                         rows.add(Map.of("marketId", market.getId(), "destinationId", target.getId(), "name", market.getName(),
                                 "submarketId", shop.getSpecId(), "blackMarket", shop.getPlugin().isBlackMarket(),
                                 "distanceLy", trip.lightYears(), "estimatedDays", docked ? 0 : trip.days(),
@@ -78,6 +64,6 @@ public final class ResourceMarkets {
         }
         rows.sort(Comparator.comparingDouble(row -> ((Number) row.get("estimatedDays")).doubleValue()));
         return Map.of("candidates", List.copyOf(rows.subList(0, Math.min(24, rows.size()))), "matchingChannels", rows.size(),
-                "skipped", skipped, "scope", "全星区可达采购渠道，按预计旅时展示最近 24 个；报价数量受现货和容量限制，资金及缺口需逐项核对；含黑市");
+                "skipped", skipped, "scope", "全星区可达采购渠道，按预计旅时展示最近 24 个；sampleQuantity/sampleTotalPrice 仅为整批价格样例，不是建议采购数量；实际数量由规划器决定，结合现货、资金、容量和途中消耗；含黑市");
     }
 }

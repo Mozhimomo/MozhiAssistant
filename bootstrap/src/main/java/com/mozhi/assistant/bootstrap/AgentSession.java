@@ -98,9 +98,9 @@ public final class AgentSession implements AutoCloseable {
         status = "墨汁正在思考，请稍候……";
         answer = "";
         details = "";
-        partialAnswer = "";
         appendMessage("墨汁", "等待回复……");
         activeReplyId = nextMessageId;
+        partialAnswer = "";
         ReplyStream stream = new ReplyStream();
         replyStream = stream;
         nextStreamRefreshNanos = 0;
@@ -168,7 +168,8 @@ public final class AgentSession implements AutoCloseable {
             return false;
         }
         try {
-            displayReply(pending.get());
+            AgentReply result = pending.get();
+            displayReply(result);
         } catch (Exception exception) {
             displayInitializationFailure(exception);
         } finally {

@@ -13,24 +13,10 @@ import java.util.LinkedHashSet;
 final class ActionSupport {
     private ActionSupport() {}
 
-    static ActionSpec.Parameter parameter(String name, ActionSpec.Type type, boolean required, String description) {
-        return new ActionSpec.Parameter(name, type, required, description);
-    }
-
     static String text(Step step, String key) {
         Object value = step.parameters().get(key);
         if (!(value instanceof String text) || text.isBlank()) throw new IllegalArgumentException("参数不能为空：" + key);
         return text;
-    }
-
-    static int quantity(Step step) {
-        Object raw = step.parameters().get("quantity");
-        if (!(raw instanceof Number)) throw new IllegalArgumentException("quantity 必须是整数");
-        int quantity;
-        try { quantity = new BigDecimal(raw.toString()).intValueExact(); }
-        catch (ArithmeticException error) { throw new IllegalArgumentException("quantity 必须是有效整数", error); }
-        if (quantity <= 0 || quantity > 1_000_000) throw new IllegalArgumentException("quantity 必须在 1 至 1000000 之间");
-        return quantity;
     }
 
     static ExecutionResult result(Step step, ExecutionResult.Status status, String message) {

@@ -1,7 +1,7 @@
 **/target/
 /.mvn/repository/
 /.mvn/verification-settings.xml
-# Keep game libraries out; ship bootstrap, chat agent, fleet agent and shared LLM runtime JARs.
+# 排除游戏依赖库；仅发布引导、对话智能体、舰队智能体和共享大模型运行库的 JAR。
 /jars/*.jar
 !/jars/mozhi-bootstrap.jar
 !/jars/agent-runtime.jar
@@ -12,6 +12,8 @@
 *.iml
 /data/config/agent.properties
 /data/memory/
+/data/diagnostics/
 /dist/
-# Local algorithm reference; not a source or runtime dependency.
+# 本地算法参考，不作为源码依赖或运行依赖。
 /starsector-trade-route-planner-master/
+data/config/.recovery-backups/

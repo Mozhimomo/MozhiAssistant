@@ -1,12 +1,20 @@
-# Mozhi LLM Client
+# 墨汁大模型客户端
 
 Java 17 的 LLM 调用基础设施，支持 OpenAI 兼容的 Chat Completions 接口。
 
 模块独立于墨汁 agent、游戏 API、UI、记忆与工具执行。提供同步请求、流式正文回调、超时、重试、环境变量密钥、思考参数以及错误脱敏。调用方传入历史和工具定义，取得完整 LangChain4j 响应，自行决定如何处理工具请求。
 
-## 引入
+## 用量诊断
 
-### Maven
+`UsageMetrics.configure(configUrl, "fleet" 或 "chat")` 将元数据日志写到配置目录的同级 `diagnostics` 目录；不配置时仅在内存累计。通过 `try (var scope = UsageMetrics.scope("review")) { ... }` 分类调用，`snapshot()` 查看当前类加载器生命周期汇总。同步、AI Service（含空正文重试）和流式调用均计数，支持 OpenAI cachedTokens 和 DeepSeek 原始 usage 的命中/未命中字段。缺失用量保留为未知，失败或取消不代表无费用，SDK 内部重试可能不可见。
+
+结构化回答截断或重试后仍无正文时，抛出 `StructuredOutputException`，分别标记 `OUTPUT_LIMIT` / `EMPTY_RESPONSE`；错误脱敏后仍保留类型，不保留原始异常链。业务层可以据此进行有界恢复。日志额外记录 `answerChars`、`thinkingChars` 两个长度，不记录正文或思考文本；舰队恢复请求单列为 `planning_recovery`。
+
+日志只含分类、字符数、时间、耗时、token 数及完成原因，不记录原始请求/响应。每份日志超过 5 MiB 时轮转并保留一份旧文件，写入失败不影响游戏操作，可通过 `logErrors` 查看失败计数。
+
+## 引入方式
+
+### 通过 Maven 引入
 
 先在本模块目录执行：
 
@@ -23,7 +31,7 @@ mvn -Dmaven.test.skip=true install
 <dependency>
     <groupId>com.mozhi</groupId>
     <artifactId>mozhi-llm-client</artifactId>
-    <version>0.1.1</version>
+    <version>0.1.4</version>
 </dependency>
 ```
 
@@ -31,8 +39,8 @@ mvn -Dmaven.test.skip=true install
 
 构建得到：
 
-- `target/mozhi-llm-client-0.1.1.jar`：普通 Maven 构件，依赖由 Maven 管理。
-- `target/mozhi-llm-client-0.1.1-all.jar`：包含 LangChain4j 的 OpenAI 客户端、核心请求/响应类型、HTTP 客户端、Jackson 等运行依赖。手动引入时选这个文件。
+- `target/mozhi-llm-client-0.1.4.jar`：普通 Maven 构件，依赖由 Maven 管理。
+- `target/mozhi-llm-client-0.1.4-all.jar`：包含 LangChain4j 的 OpenAI 客户端、核心请求/响应类型、HTTP 客户端、Jackson 等运行依赖。手动引入时选这个文件。
 
 两者选一种。单 JAR 未重定位第三方包，其他版本的 LangChain4j/Jackson 应使用独立类加载器隔离。单 JAR 同时包含 LangChain4j 的工具和 AiServices 模块；LlmClient 接口本身只负责模型调用，不自动执行工具。
 
@@ -156,7 +164,7 @@ runtime.close();
 在本模块目录执行（Windows）：
 
 ```powershell
-javac -encoding UTF-8 --release 17 -cp target/mozhi-llm-client-0.1.1-all.jar -d target/example-classes examples/example/ChatBridge.java examples/example/runtime/ChatEntry.java examples/example/IsolatedChatExample.java
+javac -encoding UTF-8 --release 17 -cp target/mozhi-llm-client-0.1.4-all.jar -d target/example-classes examples/example/ChatBridge.java examples/example/runtime/ChatEntry.java examples/example/IsolatedChatExample.java
 ```
 
 仅编译示例不发送模型请求。填写自己的配置后可自行运行 `example.IsolatedChatExample`。
@@ -170,3 +178,5 @@ javac -encoding UTF-8 --release 17 -cp target/mozhi-llm-client-0.1.1-all.jar -d 
 `baseUrl`、`modelName`、`apiKey`、`timeoutSeconds`、`streamingEnabled`、`structuredOutputMode`、`maxRetries`、`maxTokens` / `maxCompletionTokens`（二选一）、`temperature`、`topP`、`presencePenalty`、`frequencyPenalty`、`seed`、`thinkingMode`、`reasoningEffort`。
 
 `apiKey` 可直接填真实密钥，或填写 `${MOZHI_API_KEY}` 等环境变量引用。库不记录 HTTP 请求/响应日志，配置创建的客户端会脱敏抛出的错误信息。
+
+`LlmConfig.cheapFrom(properties)` 派生独立轻量模型配置，空项继承主模型。支持 `cheapModelName`、`cheapBaseUrl`、`cheapApiKey`、`cheapTimeoutSeconds`、`cheapMaxRetries`、`cheapStreamingEnabled`、`cheapTemperature`、`cheapTopP`、`cheapMaxTokens` / `cheapMaxCompletionTokens`、`cheapThinkingMode`、`cheapReasoningEffort` 和 `cheapStructuredOutputMode`。派生配置不修改主模型，不将密钥写回文件；两项输出预算不能同时填写。

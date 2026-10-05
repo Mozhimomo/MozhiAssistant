@@ -20,33 +20,30 @@ public final class Executor {
     private final Thread owner = Thread.currentThread();
     private final ActionContext context;
     private final ExecutionHistory history;
-    private final Map<String, Action> actions = new LinkedHashMap<>();
+    private final com.mozhi.fleet.tools.FleetToolRegistry tools;
     private final Map<String, ExecutionResult> terminal = new LinkedHashMap<>();
     private Step active;
     private String blockedReason = "";
 
     public Executor(ActionContext context, ExecutionHistory history) {
-        this(context, history, List.of(new BuyAction(), new SellAction(), new MoveToAction(), new ReturnToPlayerAction(), new CalculateTradeRouteAction()));
+        this(context, history, List.of(new BuyAction(), new SellAction(), new MoveToAction(), new FollowFleetAction(), new ReturnToPlayerAction(), new CalculateTradeRouteAction(), new PrepareTradeHopAction(), new TransferToPlayerAction()));
     }
 
     public Executor(ActionContext context, ExecutionHistory history, List<Action> actions) {
         this.context = Objects.requireNonNull(context);
         this.history = Objects.requireNonNull(history);
-        for (Action action : List.copyOf(actions)) {
-            if (this.actions.putIfAbsent(action.spec().name(), action) != null) throw new IllegalArgumentException("重复动作：" + action.spec().name());
-        }
+        tools = new com.mozhi.fleet.tools.FleetToolRegistry(actions);
     }
 
     /** 与实际执行使用同一份动作契约，直接传给 PlanningRequest。 */
-    public List<ActionSpec> actionSpecs() { return actions.values().stream().map(Action::spec).toList(); }
+    public List<ActionSpec> actionSpecs() { return tools.specifications(); }
 
     public void validatePlan(Plan plan) {
         for (int i = 0; i < plan.steps().size(); i++) {
             Step step = plan.steps().get(i);
-            Action action = actions.get(step.action());
-            if (action == null) throw new IllegalArgumentException("未知动作：" + step.action());
-            action.spec().validate(step.parameters());
+            tools.validate(step);
             if (step.action().equals("RETURN") && i != plan.steps().size() - 1) throw new IllegalArgumentException("RETURN 必须在末尾");
+            if (step.tool().equals("FOLLOW_FLEET") && i != plan.steps().size() - 1) throw new IllegalArgumentException("持续跟随必须在计划末尾；后续行动应由新指令替换");
         }
     }
 
@@ -58,13 +55,18 @@ public final class Executor {
             throw new IllegalArgumentException("决策结果不能重复已执行的步骤：" + step.id());
     }
 
-    public void cancelBackground() { actions.values().forEach(Action::cancelBackground); }
-    public boolean backgroundStopped() { return actions.values().stream().allMatch(Action::backgroundStopped); }
+    public void cancelBackground() { tools.cancelBackground(); }
+    public boolean backgroundStopped() { return tools.backgroundStopped(); }
+    public void pause() { requireOwner(); if (active != null) tools.pause(active.tool()); }
 
     public ExecutionHistory.Snapshot historySnapshot() { requireOwner(); return history.snapshot(); }
     public List<ExecutionResult> tradeResults() {
         requireOwner();
         return terminal.values().stream().filter(result -> result.tradeReceipt() != null).toList();
+    }
+    public Map<String, Object> tradeSummary() {
+        requireOwner();
+        return com.mozhi.fleet.model.TradeSummary.of(List.copyOf(terminal.values()));
     }
 
     public FleetResources resources() {
@@ -115,6 +117,8 @@ public final class Executor {
         if (plan.steps().get(stepIndex).action().equals("RETURN") && stepIndex != plan.steps().size() - 1) {
             return publish(new ExecutionResult(plan.steps().get(stepIndex), FAILED, "RETURN 会移除分舰队，必须是计划最后一步"));
         }
+        if (plan.steps().get(stepIndex).tool().equals("FOLLOW_FLEET") && stepIndex != plan.steps().size() - 1)
+            return publish(new ExecutionResult(plan.steps().get(stepIndex), FAILED, "持续跟随必须是计划最后一步"));
         return execute(plan.steps().get(stepIndex));
     }
 
@@ -132,18 +136,16 @@ public final class Executor {
             if (history.snapshot().completedStepIds().contains(step.id())) {
                 return publish(new ExecutionResult(step, FAILED, "此步骤已在历史中完成，禁止再次执行；请由 Agent 核对进度"));
             }
-            Action action = actions.get(step.action());
-            if (action == null) throw new IllegalArgumentException("未知动作：" + step.action());
-            action.spec().validate(step.parameters());
+            tools.validate(step);
             if (context.fleet() == context.player()) throw new IllegalStateException("不能将玩家舰队作为分舰队执行动作");
             if (context.fleet().isExpired() || context.fleet().getContainingLocation() == null) throw new IllegalStateException("受控舰队已不存在");
             active = step;
-            if (context.sector().isPaused()) return publish(new ExecutionResult(step, WAITING, "游戏暂停，等待恢复"));
+            if (context.sector().isPaused()) { tools.pause(step.tool()); return publish(new ExecutionResult(step, WAITING, "游戏暂停，等待恢复")); }
             if (context.fleet().getBattle() != null || context.fleet().isInHyperspaceTransition()) {
                 return publish(new ExecutionResult(step, WAITING, "等待受控舰队结束战斗或跃迁"));
             }
             if (context.fleet().isAIMode()) context.fleet().setAIMode(false);
-            ExecutionResult result = Objects.requireNonNull(action.execute(step, context), "动作返回空结果");
+            ExecutionResult result = tools.execute(step, context);
             if (!result.step().equals(step)) throw new IllegalStateException("动作返回了其他步骤的结果");
             return publish(result);
         } catch (UncertainActionException error) {
@@ -158,8 +160,7 @@ public final class Executor {
     public void stop() {
         requireOwner();
         if (active != null) {
-            Action action = actions.get(active.action());
-            if (action != null) action.stop(context);
+            tools.stop(active.tool(), context);
             active = null;
         }
     }
@@ -176,6 +177,11 @@ public final class Executor {
             }
         }
         if (result.status() == SUCCEEDED || result.status() == FAILED) {
+            if (!terminal.containsKey(result.step().id()) && result.status() == FAILED
+                    && (result.step().action().equals("BUY") || result.step().action().equals("SELL"))) {
+                org.apache.log4j.Logger.getLogger(Executor.class).warn("交易失败：步骤 " + result.step().id()
+                        + "，动作 " + result.step().action() + "，参数 " + result.step().parameters() + "，结果 " + result.result());
+            }
             terminal.put(result.step().id(), result);
             active = null;
         }

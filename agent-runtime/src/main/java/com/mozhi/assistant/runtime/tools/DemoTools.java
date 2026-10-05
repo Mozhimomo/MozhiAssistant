@@ -5,7 +5,7 @@ import com.mozhi.assistant.bridge.GameThreadAccess;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 
-/** Deliberately private @Tool methods exercise LangChain4j's reflective tool execution. */
+/** 有意使用私有 @Tool 方法，验证 LangChain4j 的反射工具执行。 */
 public final class DemoTools {
     private final GameThreadAccess gameThread;
 
@@ -16,11 +16,5 @@ public final class DemoTools {
     private String getFleetSummary() {
         String details = gameThread.call(PlayerFleetDetails::read);
         return details;
-    }
-
-    @Tool("精确计算两个整数之和。遇到加法问题时调用此工具。")
-    private long add(@P("第一个整数") int a, @P("第二个整数") int b) {
-        long result = (long) a + b;
-        return result;
     }
 }

@@ -7,7 +7,7 @@ import com.fs.starfarer.api.combat.EngagementResultAPI;
 import java.util.Collections;
 import java.util.Map;
 
-/** Console Commands can schedule only interaction dialogs; immediately hand off to our own overlay. */
+/** Console Commands 只能调度交互对话框，因此立即转交给自有浮层。 */
 public final class ChatDialog implements InteractionDialogPlugin {
     @Override public void init(InteractionDialogAPI dialog) {
         dialog.dismiss();

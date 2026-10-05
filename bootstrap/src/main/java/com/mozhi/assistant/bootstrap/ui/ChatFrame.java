@@ -5,7 +5,7 @@ import java.awt.Graphics2D;
 import java.awt.Polygon;
 import java.awt.Shape;
 
-/** Restrained instrument-panel styling; no decorative text or simulated telemetry. */
+/** 简洁的仪表面板样式，不添加装饰性文字或模拟遥测数据。 */
 final class ChatFrame {
     static final Color BACKGROUND = new Color(10, 19, 23);
     static final Color SURFACE = new Color(17, 31, 36);

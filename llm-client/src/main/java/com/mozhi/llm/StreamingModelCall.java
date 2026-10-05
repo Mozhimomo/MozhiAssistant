@@ -43,7 +43,7 @@ final class StreamingModelCall implements StreamingChatResponseHandler {
             checkInterrupted();
             StreamingModelCall call = new StreamingModelCall(listener);
             try {
-                return call.awaitResponse(model, request, timeoutSeconds);
+                return UsageMetrics.measure(request, () -> call.awaitResponse(model, request, timeoutSeconds));
             } catch (RuntimeException exception) {
                 // 只重发当前模型请求，完整响应到达前工具尚未执行；不重跑整个 ReAct 轮次。
                 if (attempt != 0 || call.publishedText || !isTransientConnectionFailure(exception)) {

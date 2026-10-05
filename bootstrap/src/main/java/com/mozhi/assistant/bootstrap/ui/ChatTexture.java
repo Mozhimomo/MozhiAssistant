@@ -10,7 +10,7 @@ import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
 import org.lwjgl.opengl.GL13;
 
-/** CPU typography uploaded only when dirty. All OpenGL work stays in the campaign render callback. */
+/** 仅在内容变化时上传 CPU 排版结果；所有 OpenGL 操作均在战役渲染回调中执行。 */
 final class ChatTexture {
     private BufferedImage image;
     private IntBuffer pixels;
@@ -97,7 +97,7 @@ final class ChatTexture {
                             GL12.GL_BGRA, GL12.GL_UNSIGNED_INT_8_8_8_8_REV, pixels);
                 }
             }
-            GL11.glColor4f(1, 1, 1, 1); // Never inherit vanilla panel opacity or its text fade.
+            GL11.glColor4f(1, 1, 1, 1); // 不继承原版面板的透明度或文字淡出效果。
             GL11.glBegin(GL11.GL_QUADS);
             GL11.glTexCoord2f(0, 1); GL11.glVertex2f(x, y);
             GL11.glTexCoord2f(1, 1); GL11.glVertex2f(x + w, y);

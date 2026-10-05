@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Map;
 import org.lwjgl.input.Keyboard;
 
-/** An independent chat canvas. Game widgets are not involved in rendering or editing text. */
+/** 独立聊天画布，文本渲染与编辑不依赖游戏控件。 */
 public final class ChatWindow {
     private static final Color BACKGROUND = ChatFrame.BACKGROUND;
     private static final Color SURFACE = ChatFrame.SURFACE;
@@ -24,9 +24,12 @@ public final class ChatWindow {
     private final ChatEditor editor = new ChatEditor();
     private final ChatPortrait portrait = new ChatPortrait();
     private final FleetStatusPanel fleetPanel = new FleetStatusPanel();
-    private boolean fleetTab;
+    private final FleetOverviewPanel overviewPanel = new FleetOverviewPanel();
+    private int activeTab;
     private boolean splitFleet;
     private Rectangle fleetArea = new Rectangle();
+    private Rectangle overviewArea = new Rectangle();
+    private long nextFleetPoll;
     private final Runnable close;
     private final List<Hit> hits = new ArrayList<>();
     private final Map<Long, MessageBlock> blocks = new HashMap<>();
@@ -46,7 +49,7 @@ public final class ChatWindow {
     private boolean followLatest = true;
     private boolean caretVisible;
     private String hovered = "";
-    private int width, height, sidebar, bodyX, bodyWidth;
+    private int width, height, bodyX, bodyWidth;
     private float left, bottom;
     private Rectangle history = new Rectangle();
     private Rectangle input = new Rectangle();
@@ -67,7 +70,13 @@ public final class ChatWindow {
 
     public void update() {
         resize();
-        if (fleetPanel.update()) dirty = true;
+        long now = System.nanoTime();
+        if (now >= nextFleetPoll) {
+            nextFleetPoll = now + 500_000_000L;
+            var snapshot = com.mozhi.assistant.bridge.FleetAgentAccess.view();
+            if (fleetPanel.setModel(FleetPresentation.from(snapshot))) dirty = true;
+            if (overviewPanel.setModel(FleetOverview.from(snapshot))) dirty = true;
+        }
         AgentSession current = AgentSession.current();
         if (session != current) {
             session = current;
@@ -94,18 +103,18 @@ public final class ChatWindow {
     }
 
     private void resize() {
-        int w = Math.max(320, Math.min(1120, (int) Global.getSettings().getScreenWidth() - 64));
-        int h = Math.max(360, Math.min(800, (int) Global.getSettings().getScreenHeight() - 64));
+        ChatLayout layout = ChatLayout.fit((int) Global.getSettings().getScreenWidth(), (int) Global.getSettings().getScreenHeight());
+        int w = layout.width(), h = layout.height();
         left = (Global.getSettings().getScreenWidth() - w) / 2;
         bottom = (Global.getSettings().getScreenHeight() - h) / 2;
         if (w == width && h == height) return;
-        width = w; height = h; sidebar = 0;
-        splitFleet = width >= 960;
-        bodyX = 30;
-        bodyWidth = splitFleet ? width - 382 : width - 60;
-        fleetArea = splitFleet ? new Rectangle(width - 330,110,300,height - 140)
-                : new Rectangle(bodyX,110,bodyWidth,height - 140);
-        history = new Rectangle(bodyX, 110, bodyWidth, height - 346);
+        width = w; height = h;
+        splitFleet = layout.split();
+        bodyX = layout.conversation().x;
+        bodyWidth = layout.conversation().width;
+        fleetArea = layout.plan(); overviewArea = layout.overview();
+        int historyTop = layout.conversation().y + 42;
+        history = new Rectangle(bodyX, historyTop, bodyWidth, Math.max(24, height - historyTop - 236));
         input = new Rectangle(bodyX + 17, height - 178, bodyWidth - 34, 81);
         blocks.clear();
         layoutMessages();
@@ -154,42 +163,41 @@ public final class ChatWindow {
         if (repaint) { dirty = false; lastPaint = now; }
     }
 
-    /** Called only by the render listener, including when disposing a closed window. */
+    /** 仅由渲染监听器调用，关闭窗口后的资源释放也在此执行。 */
     public void dispose() { texture.dispose(); }
 
     private void paint(Graphics2D g) {
         hits.clear();
         ChatFrame.panel(g, 1, 1, width - 3, height - 3, 15, BACKGROUND, BORDER);
         ChatFrame.brackets(g, 7, 7, width - 15, height - 15, ChatText.ACCENT);
-        if (sidebar > 0) {
-            paintContact(g);
-            ChatText.label(g, "通讯记录", ChatText.TITLE, ChatText.TEXT, bodyX, 53);
-        } else {
-            portrait.draw(g, bodyX, 25, 48);
-            ChatText.label(g, "墨汁", ChatText.TITLE, ChatText.TEXT, bodyX + 62, 57);
-        }
+        portrait.draw(g, bodyX, 22, 52);
+        ChatText.label(g, "墨汁", ChatText.TITLE, ChatText.TEXT, bodyX + 68, 49);
+        if (width >= 600) ChatText.label(g, "舰队通讯与任务中心", ChatText.SMALL, ChatText.MUTED, bodyX + 69, 72);
         button(g, "new", new Rectangle(width - 202, 29, 130, 36),
                 confirmUntil == 0 ? "新对话" : "再次点击清空", false, this::newConversation);
         button(g, "close", new Rectangle(width - 60, 29, 32, 36), "×", false, close);
         g.setColor(BORDER); g.drawLine(bodyX, 94, width - 30, 94);
         g.setColor(ChatText.ACCENT); g.fillRect(bodyX, 93, 48, 2);
-        if (!splitFleet) button(g, "fleet-tab", new Rectangle(width - 292,29,82,36),
-                fleetTab ? "返回对话" : "舰队计划", fleetTab, () -> { fleetTab = !fleetTab; });
-        if (splitFleet || !fleetTab) {
+        if (!splitFleet) {
+            String[] tabs = {"对话", "任务计划", "分舰队"};
+            int tabWidth = Math.min(132, (width - 76) / 3);
+            for (int i = 0; i < tabs.length; i++) {
+                final int tab = i;
+                button(g, "tab-" + i, new Rectangle(30 + i * (tabWidth + 8), 104, tabWidth, 32), tabs[i], activeTab == i,
+                        () -> { activeTab = tab; selecting = draggingScroll = false; });
+            }
+        }
+        if (splitFleet || activeTab == 0) {
+            ChatFrame.panel(g, bodyX - 12, history.y - 42, bodyWidth + 24, height - history.y + 24, 8,
+                    new Color(12, 23, 28), BORDER);
+            ChatText.label(g, "对话", ChatText.BODY, ChatText.TEXT, bodyX + 4, history.y - 14);
+            if (bodyWidth > 420) ChatText.label(g, "下达指令 · 查询进展 · 确认决策", ChatText.SMALL, ChatText.MUTED,
+                    bodyX + bodyWidth - 226, history.y - 15);
             if (messages.isEmpty()) paintEmptyHistory(g); else paintMessages(g);
             paintComposer(g);
         }
-        if (splitFleet || fleetTab) fleetPanel.paint(g,fleetArea);
-    }
-
-    private void paintContact(Graphics2D g) {
-        g.setColor(new Color(13, 26, 31)); g.fillRect(17, 17, sidebar - 18, height - 34);
-        g.setColor(BORDER); g.drawLine(sidebar, 24, sidebar, height - 24);
-        ChatText.label(g, "通讯对象", ChatText.SMALL, ChatText.MUTED, 29, 55);
-        ChatText.label(g, "墨汁", ChatText.TITLE, ChatText.TEXT, 29, 93);
-        portrait.draw(g, 29, 122, sidebar - 58);
-        int separatorY = 122 + sidebar - 58 + 22;
-        g.setColor(BORDER); g.drawLine(29, separatorY, sidebar - 29, separatorY);
+        if (splitFleet || activeTab == 1) fleetPanel.paint(g,fleetArea);
+        if (splitFleet || activeTab == 2) overviewPanel.paint(g,overviewArea);
     }
 
     private void paintEmptyHistory(Graphics2D g) {
@@ -284,7 +292,7 @@ public final class ChatWindow {
         boolean canSend = !busy && !editor.text().isBlank();
         button(g, "send", new Rectangle(bodyX + bodyWidth - 123, y + 106, 106, 34), busy ? "回复中…" : "发送", canSend,
                 this::send);
-        ChatText.label(g, "Enter 发送 · Shift+Enter 换行 · Ctrl+V 粘贴 · Esc 收起", ChatText.SMALL,
+        ChatText.label(g, bodyWidth >= 480 ? "Enter 发送 · Shift+Enter 换行 · Ctrl+V 粘贴 · Esc 收起" : "Enter 发送 · Shift+Enter 换行", ChatText.SMALL,
                 ChatText.MUTED, bodyX + 2, height - 22);
     }
 
@@ -308,23 +316,25 @@ public final class ChatWindow {
         int y = Math.round(height - (event.getY() - bottom));
         if (event.isMouseScrollEvent()) {
             int delta = -Integer.signum(event.getEventValue());
-            if ((splitFleet || fleetTab) && fleetArea.contains(x,y)) {
+            if ((splitFleet || activeTab == 1) && fleetArea.contains(x,y)) {
                 fleetPanel.scroll(delta);
-            } else if (input.contains(x, y) && !(!splitFleet && fleetTab)) {
+            } else if ((splitFleet || activeTab == 2) && overviewArea.contains(x,y)) {
+                overviewPanel.scroll(delta);
+            } else if (input.contains(x, y) && (splitFleet || activeTab == 0)) {
                 inputFirstLine = Math.max(0, Math.min(Math.max(0, inputLines.size() - 3), inputFirstLine + delta * 2));
-            } else {
+            } else if ((splitFleet || activeTab == 0) && history.contains(x, y)) {
                 scroll = Math.max(0, Math.min(maxScroll(), scroll + delta * 70));
                 followLatest = scroll >= maxScroll() - 8;
             }
             dirty = true;
         }
         if (event.isLMBDownEvent()) {
-            if (input.contains(x, y) && !(!splitFleet && fleetTab)) {
+            if (input.contains(x, y) && (splitFleet || activeTab == 0)) {
                 focused = selecting = true;
                 editor.moveTo(hitEditor(x, y), event.isShiftDown());
                 if (event.isDoubleClick()) editor.selectAll();
                 dirty = true;
-            } else if (x >= bodyX + bodyWidth - 13 && x <= bodyX + bodyWidth && history.contains(x, y) && !(!splitFleet && fleetTab) && maxScroll() > 0) {
+            } else if (x >= bodyX + bodyWidth - 13 && x <= bodyX + bodyWidth && history.contains(x, y) && (splitFleet || activeTab == 0) && maxScroll() > 0) {
                 draggingScroll = true;
                 scrollGrab = scrollbar.contains(x, y) ? y - scrollbar.y : scrollbar.height / 2;
                 dragScrollbar(y);
@@ -360,7 +370,7 @@ public final class ChatWindow {
         if (key == Keyboard.KEY_ESCAPE || (key == Keyboard.KEY_M && event.isCtrlDown() && event.isShiftDown())) {
             close.run(); return;
         }
-        if (!splitFleet && fleetTab) return;
+        if (!splitFleet && activeTab != 0) return;
         if (key == Keyboard.KEY_PRIOR || key == Keyboard.KEY_NEXT) {
             scroll = Math.max(0, Math.min(maxScroll(), scroll + (key == Keyboard.KEY_PRIOR ? -1 : 1) * history.height * .8f));
             followLatest = scroll >= maxScroll() - 8; dirty = true; return;

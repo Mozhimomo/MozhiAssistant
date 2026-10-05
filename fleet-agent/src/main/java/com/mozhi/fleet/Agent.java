@@ -28,6 +28,7 @@ public final class Agent implements AutoCloseable {
     public record State(View view, long revision, double elapsedSeconds, boolean executable,
                         String queuedReason, Executor.State execution, boolean replenishing, Map<String, Double> recoveryTargets,
                         boolean completionReview, boolean returnAfterCompletion, boolean returning) {
+        // 既有存档字段保留可读；新状态不再保存或使用补购阶段/目标数量。
         public State { recoveryTargets = recoveryTargets == null ? Map.of() : Map.copyOf(recoveryTargets); }
     }
 
@@ -48,9 +49,8 @@ public final class Agent implements AutoCloseable {
     private ExecutionResult lastResult;
     private Future<PlanningResult> pending;
     private PlanningRequest submitted;
-    private boolean replenishing;
     private ResourceCheck resourceCheck;
-    private Map<String, Double> recoveryTargets = Map.of();
+    private java.util.Set<String> reportedResourceIssues = java.util.Set.of();
     private boolean completionReview;
     private boolean returnAfterCompletion, returning;
 
@@ -121,8 +121,8 @@ public final class Agent implements AutoCloseable {
         this.goal = goal;
         plan = null; currentStep = 0; revision = 0; elapsedSeconds = 0;
         lastResult = null; executable = false;
-        replenishing = false; resourceCheck = null;
-        recoveryTargets = Map.of();
+        resourceCheck = null;
+        reportedResourceIssues = java.util.Set.of();
         completionReview = false;
         returnAfterCompletion = false; returning = false;
         status = Status.PLANNING;
@@ -131,7 +131,7 @@ public final class Agent implements AutoCloseable {
 
     public State snapshot() {
         requireOwner();
-        return new State(view(), revision, elapsedSeconds, executable, queuedReason, executor.snapshot(), replenishing, recoveryTargets, completionReview, returnAfterCompletion, returning);
+        return new State(view(), revision, elapsedSeconds, executable, queuedReason, executor.snapshot(), false, Map.of(), completionReview, returnAfterCompletion, returning);
     }
 
     /** 不保存 Future；恢复执行下标和终态，未完成的后台规划使用新世界快照重新提交。 */
@@ -154,8 +154,7 @@ public final class Agent implements AutoCloseable {
         currentStep = state.currentStep(); lastResult = state.lastResult(); reason = state.reason();
         revision = saved.revision(); elapsedSeconds = saved.elapsedSeconds(); executable = saved.executable();
         queuedReason = saved.queuedReason();
-        replenishing = saved.replenishing();
-        recoveryTargets = saved.recoveryTargets();
+        reportedResourceIssues = java.util.Set.of();
         completionReview = saved.completionReview();
         returnAfterCompletion = saved.returnAfterCompletion(); returning = saved.returning();
         if (executor.isBlocked()) { block(executor.blockedReason()); return; }
@@ -168,7 +167,8 @@ public final class Agent implements AutoCloseable {
     public void advance(double realSeconds, boolean paused) {
         requireOwner();
         if (!Double.isFinite(realSeconds) || realSeconds < 0) throw new IllegalArgumentException("时间增量必须为非负秒数");
-        if (closed || paused || !active()) return;
+        if (closed || !active()) return;
+        if (paused) { executor.pause(); return; }
         if (completionReview) {
             consume();
             submitIfNeeded();
@@ -176,7 +176,7 @@ public final class Agent implements AutoCloseable {
         }
         elapsedSeconds = Math.min(intervalSeconds, elapsedSeconds + realSeconds);
         if (!merged() && !refreshResources()) return;
-        if (!calculating()) consume();
+        consume();
         if (!active()) return;
         if (executable) {
             try {
@@ -186,7 +186,7 @@ public final class Agent implements AutoCloseable {
                 reason = lastResult.result();
                 // RETURN 已合并并移除分舰队，不再读取其空货舱。
                 boolean merged = lastResult.status() == ExecutionResult.Status.SUCCEEDED && lastResult.step().action().equals("RETURN");
-                var review = merged ? null : monitor.check(lastResult, resources.get(), recoveryTargets);
+                var review = merged ? null : monitor.check(lastResult, resources.get());
                 switch (merged ? monitor.check(lastResult) : review.decision()) {
                     case CONTINUE -> status = Status.EXECUTING;
                     case ADVANCE -> {
@@ -210,6 +210,8 @@ public final class Agent implements AutoCloseable {
                         revision++;
                         executable = false;
                         if (executor.isBlocked()) { block(executor.blockedReason()); return; }
+                        // 执行失败已使旧快照失效，取消周期检查，直接按本次失败重新规划。
+                        cancelPending();
                         status = Status.PLANNING;
                         queuedReason = "步骤失败：" + lastResult.result();
                     }
@@ -240,6 +242,12 @@ public final class Agent implements AutoCloseable {
     public boolean returnAfterCompletion() { return returnAfterCompletion; }
     public boolean returning() { return returning; }
     public java.util.List<ExecutionResult> tradeResults() { requireOwner(); return executor.tradeResults(); }
+    public Map<String, Object> tradeSummary() { requireOwner(); return executor.tradeSummary(); }
+    public Plan remainingPlan() {
+        requireOwner();
+        if (plan == null || currentStep >= plan.steps().size()) return null;
+        return new Plan(plan.id(), plan.goal(), plan.steps().subList(currentStep, plan.steps().size()));
+    }
 
     public boolean merged() {
         return lastResult != null && lastResult.status() == ExecutionResult.Status.SUCCEEDED && lastResult.step().action().equals("RETURN");
@@ -264,12 +272,15 @@ public final class Agent implements AutoCloseable {
     private void submitIfNeeded() {
         if (queuedReason.isEmpty() || !active()) return;
         if (!completionReview && !merged() && !refreshResources()) return;
-        if (pending != null || calculating()) return;
+        boolean resourceReview = queuedReason.equals(PlanningRequest.RESOURCE_ADVICE)
+                || (queuedReason.equals("定期重新规划") && resourceCheck != null && resourceCheck.status() == ResourceCheck.Status.ADVISORY);
+        // 持续短缺的周期复查也不能被长时间跑商计算推迟。
+        if (pending != null || (calculating() && !resourceReview)) return;
         String trigger = queuedReason;
         queuedReason = "";
         elapsedSeconds = 0;
         try {
-            if (completionReview && !merged()) resourceCheck = monitor.checkResources(resources.get(), recoveryTargets);
+            if (completionReview && !merged()) resourceCheck = monitor.checkResources(resources.get());
             PlanningRequest request = new PlanningRequest(taskId, revision, goal, observations.get(),
                     executor.historySnapshot(), trigger, executor.actionSpecs().stream().filter(action -> !action.name().equals("RETURN")).toList(),
                     plan, resourceCheck, completionReview);
@@ -287,13 +298,15 @@ public final class Agent implements AutoCloseable {
         pending = null; submitted = null;
         // 步骤完成/失败是关键进度变化；普通航行位置变化不会让规划结果反复失效。
         if (!taskId.equals(request.taskId()) || revision != request.revision()) {
-            queuedReason = "执行进度已变化，使用最新结果重新规划";
+            com.mozhi.llm.UsageMetrics.event("staleResult");
+            queuedReason = request.lightCheck() ? PlanningRequest.RESOURCE_ADVICE : "执行进度已变化，使用最新结果重新规划";
             return;
         }
         try {
             PlanningResult result = future.get(); // 已经 isDone，不阻塞主线程。
             if (!taskId.equals(result.taskId()) || revision != result.revision()) {
-                queuedReason = "规划结果版本不符，重新规划";
+                com.mozhi.llm.UsageMetrics.event("staleResult");
+                queuedReason = request.lightCheck() ? PlanningRequest.RESOURCE_ADVICE : "规划结果版本不符，重新规划";
                 return;
             }
             reason = result.reason();
@@ -309,21 +322,7 @@ public final class Agent implements AutoCloseable {
                     }
                     if (request.completionReview()) {
                         completionReview = false;
-                        resourceCheck = monitor.checkResources(resources.get(), recoveryTargets);
-                        recoveryTargets = resourceCheck.targets();
-                        replenishing = resourceCheck.status() == ResourceCheck.Status.REPLAN;
-                        if (resourceCheck.status() == ResourceCheck.Status.BLOCKED) { block(resourceCheck.reason()); return; }
-                    }
-                    if (resourceCheck.status() == ResourceCheck.Status.REPLAN
-                            && !monitor.coversResupply(next, 0, resourceCheck, false)) {
-                        block("补购规划未优先安排所缺燃料、补给或船员：" + resourceCheck.reason());
-                        return;
-                    }
-                    if (request.resources() != null && request.resources().status() == ResourceCheck.Status.REPLAN
-                            && resourceCheck.status() == ResourceCheck.Status.REPLAN
-                            && !monitor.coversResupply(next, 0, request.resources(), true)) {
-                        block("补购规划数量不足：" + resourceCheck.reason());
-                        return;
+                        resourceCheck = monitor.checkResources(resources.get());
                     }
                     if (lastResult != null && lastResult.status() == ExecutionResult.Status.FAILED
                             && next.steps().stream().anyMatch(step -> step.id().equals(lastResult.step().id()))) {
@@ -335,12 +334,17 @@ public final class Agent implements AutoCloseable {
                     plan = next; currentStep = 0; executable = true; status = Status.EXECUTING;
                 }
                 case KEEP -> {
-                    if (!executable) { block("当前执行已暂停，需要新计划，不能 KEEP。" + (resourceCheck.status() == ResourceCheck.Status.REPLAN ? resourceCheck.reason() : "")); return; }
+                    if (!executable) { block("当前执行已暂停，需要新计划，不能 KEEP。" + (resourceCheck.status() == ResourceCheck.Status.ADVISORY ? resourceCheck.reason() : "")); return; }
                     status = Status.EXECUTING;
                 }
                 case GOAL_REACHED -> {
-                    if (!request.completionReview() && resourceCheck != null && resourceCheck.status() == ResourceCheck.Status.REPLAN) block("资源尚未补足，不能结束任务：" + resourceCheck.reason());
-                    else if (!request.completionReview()) beginCompletionReview();
+                    if (executable && plan != null && currentStep < plan.steps().size()
+                            && plan.steps().get(currentStep).tool().equals("FOLLOW_FLEET")) {
+                        reason = "持续跟随中，靠近目标不代表任务结束；等待玩家停止或改变指令";
+                        status = Status.EXECUTING;
+                        break;
+                    }
+                    if (!request.completionReview()) beginCompletionReview();
                     else if ((returnAfterCompletion || returning) && !merged()) beginReturn("目标验收成功，按玩家授权返航：" + result.reason());
                     else finish(Status.COMPLETED, result.reason());
                 }
@@ -364,32 +368,24 @@ public final class Agent implements AutoCloseable {
 
     private boolean active() { return status == Status.PLANNING || status == Status.EXECUTING || status == Status.REVIEWING; }
     private boolean refreshResources() {
-        try { return handleResources(monitor.checkResources(resources.get(), recoveryTargets)); }
+        try { return handleResources(monitor.checkResources(resources.get())); }
         catch (RuntimeException error) { block("无法检查舰队资源：" + message(error)); return false; }
     }
 
     private boolean handleResources(ResourceCheck check) {
         resourceCheck = check;
-        recoveryTargets = check.targets();
-        if (check.status() == ResourceCheck.Status.BLOCKED) { block(check.reason()); return false; }
-        if (check.status() == ResourceCheck.Status.READY) {
-            if (replenishing && !executable) {
-                revision++; cancelPending(); queuedReason = "舰队资源已恢复，继续原始任务的剩余工作";
-            }
-            replenishing = false;
-            return true;
-        }
-        // 正在前往补购地点时，不因同一缺口每帧取消规划或重置航行。
-        if (replenishing && (!executable || monitor.coversResupply(plan, currentStep, check, false))) return true;
-        revision++;
-        cancelPending(); executor.stop();
-        replenishing = true; executable = false; status = Status.PLANNING;
-        queuedReason = check.reason(); reason = queuedReason;
+        boolean newIssue = !reportedResourceIssues.containsAll(check.issues());
+        reportedResourceIssues = check.issues();
+        // 建议只排队一次轻量判断，不停止动作、不取消在途请求、不改变进度版本。
+        // 持续存在的问题由 15 秒周期复查；真正的执行失败仍优先走失败处理。
+        if (newIssue && (queuedReason.isEmpty() || queuedReason.equals("定期重新规划")))
+            queuedReason = PlanningRequest.RESOURCE_ADVICE;
         return true;
     }
+
     private boolean calculating() {
         return executable && plan != null && currentStep < plan.steps().size()
-                && plan.steps().get(currentStep).action().equals("CALCULATE_TRADE_ROUTE");
+                && java.util.Set.of("CALCULATE_TRADE_ROUTE", "PREPARE_TRADE_HOP").contains(plan.steps().get(currentStep).action());
     }
     public void cancelBackground() { planner.close(); executor.cancelBackground(); }
     public boolean backgroundStopped() { return planner.isStopped() && executor.backgroundStopped(); }
@@ -405,7 +401,10 @@ public final class Agent implements AutoCloseable {
     }
 
     private void cancelPending() {
-        if (pending != null) pending.cancel(true);
+        if (pending != null && !pending.isDone()) {
+            com.mozhi.llm.UsageMetrics.event("cancelledRequest");
+            pending.cancel(true);
+        }
         planner.cancel();
         pending = null; submitted = null;
     }

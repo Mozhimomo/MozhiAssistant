@@ -57,7 +57,7 @@ record FleetPresentation(String taskId, String planId, String goal, String statu
         String line = value.replaceAll("\\s+", " ").trim();
         return line.length() > 64 ? line.substring(0, 63) + "…" : line;
     }
-    private static String action(String name) { return switch (name) { case "MOVE_TO" -> "前往目的地"; case "BUY" -> "购买货物"; case "SELL" -> "出售货物"; case "RETURN" -> "返回玩家舰队"; case "CALCULATE_TRADE_ROUTE" -> "计算跑商路线"; default -> "执行步骤"; }; }
+    private static String action(String name) { return switch (name) { case "MOVE_TO" -> "前往目的地"; case "BUY" -> "购买货物"; case "SELL" -> "出售货物"; case "RETURN" -> "返回玩家舰队"; case "FOLLOW_FLEET" -> "持续跟随目标舰队"; case "TRANSFER_TO_PLAYER" -> "向玩家转账"; case "CALCULATE_TRADE_ROUTE" -> "计算跑商路线"; case "PREPARE_TRADE_HOP" -> "到站重算采购单"; default -> "执行步骤"; }; }
     private static String first(String... values) { for (String value : values) if (!value.isBlank()) return value; return ""; }
     private static Map<?, ?> map(Object value) { return value instanceof Map<?, ?> map ? map : Map.of(); }
     private static List<?> list(Object value) { return value instanceof List<?> list ? list : List.of(); }

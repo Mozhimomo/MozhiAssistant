@@ -33,7 +33,7 @@ final class FleetAgentHost {
             service = null;
             loader = null;
             FleetAgentAccess.bind(null, "舰队控制器初始化失败，请查看 starsector.log");
-            Global.getLogger(FleetAgentHost.class).error("Fleet agent initialization failed", failure);
+            Global.getLogger(FleetAgentHost.class).error("舰队智能体初始化失败", failure);
         }
     }
 

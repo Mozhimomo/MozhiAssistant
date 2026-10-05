@@ -15,6 +15,12 @@ import java.util.Set;
 public record PlanningRequest(String taskId, long revision, String goal, String worldState,
                               ExecutionHistory.Snapshot executionHistory, String trigger, List<ActionSpec> actions,
                               Plan currentPlan, ResourceCheck resources, boolean completionReview) {
+    public static final String RESOURCE_ADVICE = "后勤建议：请轻量模型判断是否需要重规划";
+
+    public boolean lightCheck() {
+        return !completionReview && (trigger.equals(RESOURCE_ADVICE) || trigger.equals("定期重新规划")
+                || (trigger.equals("新任务") && resources != null && resources.status() == ResourceCheck.Status.ADVISORY));
+    }
     public PlanningRequest(String taskId, long revision, String goal, String worldState,
                            ExecutionHistory.Snapshot executionHistory, String trigger, List<ActionSpec> actions, Plan currentPlan) {
         this(taskId, revision, goal, worldState, executionHistory, trigger, actions, currentPlan, null, false);

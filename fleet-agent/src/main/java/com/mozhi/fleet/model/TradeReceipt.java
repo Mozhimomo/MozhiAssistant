@@ -1,6 +1,6 @@
 package com.mozhi.fleet.model;
 
-/** 已成功结算的信用点；实际收支按游戏 float 余额差计算，报价包含关税。 */
+/** 已成功结算的星币；实际收支按游戏 float 余额差计算，报价包含关税。 */
 public record TradeReceipt(double creditsSpent, double creditsReceived, double quotedTotal) {
     public TradeReceipt {
         if (!Double.isFinite(creditsSpent) || creditsSpent < 0

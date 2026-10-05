@@ -1,7 +1,6 @@
 package example;
 
 import com.mozhi.llm.isolation.IsolatedLlmRuntime;
-import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,7 +15,10 @@ public final class IsolatedChatExample {
             throw new IllegalArgumentException("参数：LLM all JAR、示例 classes 目录、配置文件");
         }
         Properties config = new Properties();
-        try (Reader reader = Files.newBufferedReader(Path.of(args[2]), StandardCharsets.UTF_8)) {
+        try (var reader = Files.newBufferedReader(Path.of(args[2]), StandardCharsets.UTF_8)) {
+            // 跳过可选的 UTF-8 编码标记。
+            reader.mark(1);
+            if (reader.read() != '\uFEFF') reader.reset();
             config.load(reader);
         }
         try (var runtime = IsolatedLlmRuntime.open(ChatBridge.class, "example.runtime.ChatEntry",

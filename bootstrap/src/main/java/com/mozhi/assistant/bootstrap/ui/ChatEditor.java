@@ -8,7 +8,7 @@ import java.util.Deque;
 import java.util.List;
 import org.lwjgl.input.Keyboard;
 
-/** Multiline editor independent of the game's TextFieldAPI. UTF-16 caret offsets stay on code points. */
+/** 独立于游戏 TextFieldAPI 的多行编辑器；UTF-16 光标偏移始终位于码点边界。 */
 final class ChatEditor {
     static final int LIMIT = 8000;
     private String text = "";

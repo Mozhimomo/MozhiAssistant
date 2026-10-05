@@ -8,7 +8,7 @@ import java.util.Enumeration;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-/** A private runtime: JDK directly, shared game types from parent, everything else locally. */
+/** 私有运行环境：直接加载 JDK，共享游戏类型由父加载器提供，其余类型均在本地加载。 */
 public final class AgentClassLoader extends URLClassLoader {
     static { registerAsParallelCapable(); }
 
@@ -26,15 +26,15 @@ public final class AgentClassLoader extends URLClassLoader {
             Class<?> type = findLoadedClass(name);
             if (type == null) {
                 if (isShared(name)) {
-                    // One definition of bridge/game types prevents ClassCastException.
+                    // 桥接与游戏类型只保留一个定义，避免 ClassCastException。
                     type = getParent().loadClass(name);
                 } else {
                     try {
-                        // Bypass the game filter for ALL JDK modules, including org.w3c.dom
-                        // and org.xml.sax. Prefix-only java/javax checks miss these packages.
+                        // 所有 JDK 模块均绕过游戏过滤器，包括 org.w3c.dom
+                        // 和 org.xml.sax；仅检查 java/javax 前缀会遗漏这些包。
                         type = ClassLoader.getPlatformClassLoader().loadClass(name);
                     } catch (ClassNotFoundException notInJdk) {
-                        // No game-parent fallback for implementation or third-party classes.
+                        // 实现类和第三方类不回退到游戏父加载器。
                         type = findClass(name);
                     }
                 }
@@ -59,7 +59,7 @@ public final class AgentClassLoader extends URLClassLoader {
 
     @Override
     public Enumeration<URL> getResources(String name) throws IOException {
-        // Do not discover service providers supplied by the game or other mods.
+        // 不发现游戏或其他模组提供的服务实现。
         if (name.startsWith("META-INF/services/")) return findResources(name);
         Set<URL> resources = new LinkedHashSet<>(Collections.list(findResources(name)));
         resources.addAll(Collections.list(getParent().getResources(name)));

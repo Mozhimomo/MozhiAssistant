@@ -11,19 +11,24 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 一个不可变的动作定义。action 对应后续执行器注册的动作，parameters 只包含 JSON 数据。
+ * 一条不可变的工具调用请求。tool 对应注册工具名，arguments 只包含 JSON 数据。
  * description 用于展示，expectedOutcome 描述预期效果，不是实际执行结果或可执行表达式。
  * 同一个步骤跨计划继续执行时保留 ID；改变动作或参数时应创建新步骤。
  */
-public record Step(String id, String action, Map<String, Object> parameters,
+public record Step(String id, @com.fasterxml.jackson.annotation.JsonAlias("action") String tool,
+                   @com.fasterxml.jackson.annotation.JsonAlias("parameters") Map<String, Object> arguments,
                    String description, String expectedOutcome) {
     public Step {
         requireText(id, "步骤 ID");
-        requireText(action, "动作名");
+        requireText(tool, "工具名");
         requireText(description, "步骤说明");
         requireText(expectedOutcome, "预期结果");
-        parameters = copyObject(Objects.requireNonNull(parameters, "动作参数不能为空"));
+        arguments = copyObject(Objects.requireNonNull(arguments, "工具参数不能为空"));
     }
+
+    /** 既有业务代码的访问入口；持久化统一使用 tool 和 arguments。 */
+    public String action() { return tool; }
+    public Map<String, Object> parameters() { return arguments; }
 
     /** 无参数的动作使用空 Map；ID 由应用分配，不承载执行进度。 */
     public static Step create(String action, Map<String, Object> parameters,

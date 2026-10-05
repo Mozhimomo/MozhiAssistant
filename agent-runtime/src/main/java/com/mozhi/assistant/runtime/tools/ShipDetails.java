@@ -96,7 +96,7 @@ public final class ShipDetails {
         try {
             String name = names.apply(id);
             if (name != null && !name.isBlank()) return name + " [" + id + "]";
-        } catch (RuntimeException ignored) { /* Preserve ID when a mod's display spec is absent. */ }
+        } catch (RuntimeException ignored) { /* 模组缺少显示用规格时保留 ID。 */ }
         return id;
     }
 

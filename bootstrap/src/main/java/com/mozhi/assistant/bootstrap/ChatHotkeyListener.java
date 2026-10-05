@@ -12,7 +12,7 @@ import java.util.List;
 import org.lazywizard.console.Console;
 import org.lwjgl.input.Keyboard;
 
-/** Modal campaign overlay: custom rendering, exclusive input and reversible pause state. */
+/** 战役模态浮层：自定义渲染、独占输入，并可恢复暂停状态。 */
 public final class ChatHotkeyListener implements CampaignInputListener, CampaignUIRenderingListener {
     private static boolean pending;
     private static boolean open;
@@ -26,7 +26,7 @@ public final class ChatHotkeyListener implements CampaignInputListener, Campaign
     @Override
     public void processCampaignInputPreCore(List<InputEventAPI> events) {
         if (open) {
-            // Consume the whole batch even if Esc closes the window midway through it.
+            // 即使 Esc 在处理中关闭窗口，也要消费整批输入事件。
             for (InputEventAPI event : events) {
                 try {
                     if (!event.isConsumed() && open && window != null) window.input(event);
@@ -54,11 +54,11 @@ public final class ChatHotkeyListener implements CampaignInputListener, Campaign
 
     static void clearPending() {
         pending = false;
-        // Loading a save must not restore the pause state from the previous campaign.
+        // 加载存档时不得恢复上一个战役的暂停状态。
         open = false;
         if (launcher != null) launcher.reset();
         if (window != null) Keyboard.enableRepeatEvents(repeatWasEnabled);
-        // GPU deletion is deferred to the next render callback, where a GL context exists.
+        // GPU 资源释放推迟到下一次渲染回调，此时才有可用的 GL 上下文。
     }
 
     static void openPending() {
@@ -78,7 +78,7 @@ public final class ChatHotkeyListener implements CampaignInputListener, Campaign
         pending = false;
         if (!canOpen()) return;
         try {
-            // Reuse the closed canvas until its texture is disposed on the render thread.
+            // 在渲染线程释放纹理之前，复用已关闭的画布。
             if (window == null) window = new ChatWindow(ChatHotkeyListener::close);
             wasPaused = Global.getSector().isPaused();
             repeatWasEnabled = Keyboard.areRepeatEventsEnabled();
@@ -132,7 +132,7 @@ public final class ChatHotkeyListener implements CampaignInputListener, Campaign
     private static void fail(Throwable error) {
         close();
         pending = false;
-        Global.getLogger(ChatHotkeyListener.class).error("Could not display Mozhi chat", error);
+        Global.getLogger(ChatHotkeyListener.class).error("无法显示墨汁聊天", error);
         Console.showMessage("墨汁窗口无法显示，请查看 starsector.log；可继续用 MozhiAgent test 交互。");
     }
 

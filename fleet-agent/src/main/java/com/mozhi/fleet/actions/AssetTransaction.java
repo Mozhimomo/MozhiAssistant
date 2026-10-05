@@ -10,6 +10,13 @@ import java.util.List;
 /** 在一次主线程调用内转移原始资产，并在异常时按逆序恢复和核对。 */
 public final class AssetTransaction {
     private final List<Runnable> undo = new ArrayList<>();
+    private final boolean verifyAfterTransfer;
+
+    public AssetTransaction() { this(true); }
+    private AssetTransaction(boolean verifyAfterTransfer) { this.verifyAfterTransfer = verifyAfterTransfer; }
+
+    /** 买卖仅校验成交前条件；正常成交后不核对数量、余额或舰船转移结果。 */
+    public static AssetTransaction trade() { return new AssetTransaction(false); }
 
     public void onRollback(Runnable action) { undo.add(action); }
 
@@ -18,21 +25,24 @@ public final class AssetTransaction {
         float from = CargoAmounts.quantity(source, type, data), to = CargoAmounts.quantity(target, type, data);
         if (!Float.isFinite(quantity) || quantity <= 0 || !Float.isFinite(from) || !Float.isFinite(to)
                 || from < quantity || to < 0 || !Float.isFinite(to + quantity)) throw new IllegalArgumentException("实际库存或转移数量无效");
-        if (Math.abs((double) from - (from - quantity) - quantity) > 0.01
-                || Math.abs((double) (to + quantity) - to - quantity) > 0.01) throw new IllegalArgumentException("库存数值精度不足，无法准确转移指定数量");
+        if (verifyAfterTransfer && (Math.abs((double) from - (from - quantity) - quantity) > 0.01
+                || Math.abs((double) (to + quantity) - to - quantity) > 0.01)) throw new IllegalArgumentException("库存数值精度不足，无法准确转移指定数量");
         onRollback(() -> restoreQuantity(source, type, data, from));
         onRollback(() -> restoreQuantity(target, type, data, to));
         source.removeItems(type, data, quantity);
         target.addItems(type, data, quantity);
-        quantityEquals(source, type, data, from - quantity);
-        quantityEquals(target, type, data, to + quantity);
+        if (verifyAfterTransfer) {
+            quantityEquals(source, type, data, from - quantity);
+            quantityEquals(target, type, data, to + quantity);
+        }
     }
 
     public void credits(CargoAPI cargo, float amount) {
         float before = cargo.getCredits().get();
-        if (!Float.isFinite(before) || before < 0 || !Float.isFinite(amount) || amount < 0) throw new IllegalArgumentException("信用点余额无效");
+        if (!Float.isFinite(before) || before < 0 || !Float.isFinite(amount) || amount < 0) throw new IllegalArgumentException("星币余额无效");
         onRollback(() -> setCredits(cargo, before));
-        setCredits(cargo, amount);
+        if (verifyAfterTransfer) setCredits(cargo, amount);
+        else cargo.getCredits().set(amount);
     }
 
     public void moveShip(FleetDataAPI source, FleetDataAPI target, FleetMemberAPI ship) {
@@ -59,10 +69,10 @@ public final class AssetTransaction {
         target.addFleetMember(ship);
         ship.setCaptain(captain);
         ship.getRepairTracker().setMothballed(mothballed);
-        if (source.getMembersListCopy().contains(ship) || !target.getMembersListCopy().contains(ship)) {
+        if (verifyAfterTransfer && (source.getMembersListCopy().contains(ship) || !target.getMembersListCopy().contains(ship))) {
             throw new IllegalStateException("舰船转移未完成");
         }
-        if (ship.isMothballed() != mothballed || ship.getCaptain() != captain) throw new IllegalStateException("舰船状态转移未完成");
+        if (verifyAfterTransfer && (ship.isMothballed() != mothballed || ship.getCaptain() != captain)) throw new IllegalStateException("舰船状态转移未完成");
     }
 
     public void moveOfficer(FleetDataAPI source, FleetDataAPI target, OfficerDataAPI officer) {
@@ -94,7 +104,7 @@ public final class AssetTransaction {
 
     private static void setCredits(CargoAPI cargo, float amount) {
         cargo.getCredits().set(amount);
-        if (Float.compare(cargo.getCredits().get(), amount) != 0) throw new IllegalStateException("信用点结算未完成");
+        if (Float.compare(cargo.getCredits().get(), amount) != 0) throw new IllegalStateException("星币结算未完成");
     }
 
     private static void restoreQuantity(CargoAPI cargo, CargoAPI.CargoItemType type, Object data, float desired) {

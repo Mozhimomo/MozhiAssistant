@@ -9,18 +9,18 @@ import java.io.InputStream;
 import javax.imageio.ImageIO;
 import javax.imageio.stream.MemoryCacheImageInputStream;
 
-/** Loads the supplied portrait once per window, retaining its transparency and aspect ratio. */
+/** 每个窗口只加载一次头像，保留透明度与宽高比。 */
 final class ChatPortrait {
     private static final String PATH = "graphics/portraits/SOD_portrait_mozhi.png";
     private final BufferedImage image = load();
 
     private static BufferedImage load() {
         try (InputStream source = Global.getSettings().openStream(PATH)) {
-            if (source == null) throw new java.io.IOException("Portrait not found: " + PATH);
-            // Avoid ImageIO's default temporary-file cache inside the game script loader.
+            if (source == null) throw new java.io.IOException("未找到头像：" + PATH);
+            // 避免在游戏脚本加载器中使用 ImageIO 默认的临时文件缓存。
             try (MemoryCacheImageInputStream stream = new MemoryCacheImageInputStream(source)) {
                 var readers = ImageIO.getImageReaders(stream);
-                if (!readers.hasNext()) throw new java.io.IOException("Unsupported portrait: " + PATH);
+                if (!readers.hasNext()) throw new java.io.IOException("不支持的头像格式：" + PATH);
                 var reader = readers.next();
                 try {
                     reader.setInput(stream);
@@ -28,7 +28,7 @@ final class ChatPortrait {
                 } finally { reader.dispose(); }
             }
         } catch (Exception error) {
-            Global.getLogger(ChatPortrait.class).warn("Could not load Mozhi portrait: " + PATH, error);
+            Global.getLogger(ChatPortrait.class).warn("无法加载墨汁头像：" + PATH, error);
             return null;
         }
     }
